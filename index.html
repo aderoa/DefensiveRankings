@@ -118,7 +118,7 @@
   <div class="header-inner">
     <div class="header-brand">
       <h1>🛡️ Defensive Rankings</h1>
-      <span class="tag">v3.8 — Real Anchor</span>
+      <span class="tag">v3.9 — Real Anchor</span>
     </div>
     <div class="header-subtitle">Archetype-weighted composite score with team defense anchor bonus</div>
   </div>
@@ -195,7 +195,7 @@
       Players on top-15 defensive teams (by real team DRTG) earn a bonus scaled by: team rank tier (top-5/10/15), minutes share (25–34+ MPG), scheme factor (player DRTG vs team DRTG), and win factor (vs median).
 
       <h4>Scoring</h4>
-      All stats are z-scored within the current season pool. The final composite uses a fixed linear transform (<code>score = raw × 0.12 + 15</code>) so that an average defender scores ~15, elite starters land in the mid-to-high 20s, and DPOY-caliber seasons reach the low-to-mid 30s. Because the scale is fixed (not min-max normalized), scores are comparable across seasons.
+      All stats are z-scored within the current season pool. The final composite uses a fixed linear transform (<code>score = raw × 0.07 + 14.5</code>) so that an average defender scores ~15, elite starters land in the mid-to-high 20s, and DPOY-caliber seasons reach the low-to-mid 30s. Because the scale is fixed (not min-max normalized), scores are comparable across seasons.
     </div>
   </details>
 </div>
@@ -408,8 +408,8 @@ function computeDefensiveScores(players) {
   // Z-score composites have stable distributions across seasons,
   // so a fixed scale produces naturally varying top scores (~30-37)
   // that allow meaningful cross-season comparison.
-  const SCORE_SCALE = 0.12;    // Controls spread
-  const SCORE_BASELINE = 15;   // Average defender ≈ 15
+  const SCORE_SCALE = 0.07;     // Controls spread
+  const SCORE_BASELINE = 14.5;  // Average defender ≈ 15
   for (const p of players) {
     p.DEF_SCORE = Math.max(0, p.FINAL_RAW * SCORE_SCALE + SCORE_BASELINE);
   }
