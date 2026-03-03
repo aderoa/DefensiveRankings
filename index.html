@@ -268,7 +268,7 @@ async function refreshData() {
     loadEl.innerHTML = `<div class="spinner"></div><br>Fetching Defensive Rankings…`;
 
     // Single fetch: pre-computed Defensive Rankings tab
-    const res = await fetch(makeURL('Defensive Rankings'));
+    const res = await fetch(makeURL('Defensive_Rankings'));
     if (!res.ok) throw new Error(`HTTP ${res.status} fetching Defensive Rankings`);
     const data = await res.json();
 
