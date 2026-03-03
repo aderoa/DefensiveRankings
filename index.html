@@ -118,7 +118,7 @@
   <div class="header-inner">
     <div class="header-brand">
       <h1>🛡️ Defensive Rankings</h1>
-      <span class="tag">v4.4 — Real Anchor</span>
+      <span class="tag">v4.5.1 — Real Anchor</span>
     </div>
     <div class="header-subtitle">Archetype-weighted composite score with team defense anchor bonus</div>
   </div>
@@ -422,20 +422,19 @@ function computeDefensiveScores(players) {
   }
 
   // ═══ ADJUSTMENT 2: Per-Minute Efficiency Bonus ═══
-  // Reward players with high defensive score relative to minutes played
-  // Z-score SC/MPG across the pool, then apply a small bonus
+  // Z-score SC/MPG (using raw score, before GP adjustment) across the pool
+  // Then apply as a small multiplier on the GP-adjusted score
   const scPerMin = players.map(p => p.MPG > 0 ? p.DEF_SCORE_RAW / p.MPG : 0);
   const effMean = scPerMin.reduce((a, b) => a + b, 0) / scPerMin.length;
   const effStd = Math.sqrt(scPerMin.reduce((a, v) => a + (v - effMean) ** 2, 0) / scPerMin.length) || 1;
-  const EFF_WEIGHT = 0.08; // Controls how much efficiency shifts the score
+  const EFF_WEIGHT = 0.08;
 
   for (let i = 0; i < players.length; i++) {
     const p = players[i];
     const effZ = (scPerMin[i] - effMean) / effStd;
     p.EFF_Z = effZ;
-    // Efficiency multiplier: average defender = 1.0, +1σ = 1.08, -1σ = 0.92
+    p.SC_MPG = scPerMin[i];
     p.EFF_MULT = 1.0 + EFF_WEIGHT * effZ;
-    // Clamp
     p.EFF_MULT = Math.max(0.85, Math.min(1.20, p.EFF_MULT));
     p.DEF_SCORE = Math.max(0, p.DEF_SCORE_GP * p.EFF_MULT);
   }
