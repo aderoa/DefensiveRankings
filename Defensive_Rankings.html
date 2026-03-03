@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NBA Defensive Rankings — Hoopsmatic</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Source+Sans+3:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-primary: #0a0e17;
+    --bg-secondary: #111827;
+    --bg-card: #151d2e;
+    --bg-row-hover: #1a2540;
+    --border: #1e2d4a;
+    --text-primary: #e8ecf4;
+    --text-secondary: #8892a6;
+    --text-muted: #555f73;
+    --accent-gold: #f0b637;
+    --accent-blue: #3b82f6;
+    --accent-cyan: #22d3ee;
+    --surplus-pos: #10b981;
+    --surplus-neg: #ef4444;
+    --surplus-neutral: #6b7280;
+    --interior: #e06040;
+    --perimeter: #40a0e0;
+    --mix: #a070d0;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg-primary); color: var(--text-primary); font-family: 'Source Sans 3', sans-serif; min-height: 100vh; line-height: 1.5; }
+
+  .header { background: linear-gradient(135deg, #0d1321 0%, #172040 50%, #0d1321 100%); border-bottom: 1px solid var(--border); padding: 2.5rem 2rem 2rem; position: relative; overflow: hidden; }
+  .header::before { content: ''; position: absolute; top:0;left:0;right:0;bottom:0; background: repeating-linear-gradient(90deg,transparent,transparent 60px,rgba(59,130,246,0.03) 60px,rgba(59,130,246,0.03) 61px); pointer-events: none; }
+  .header-inner { max-width: 1400px; margin: 0 auto; position: relative; z-index: 1; }
+  .header-brand { display: flex; align-items: baseline; gap: 0.75rem; margin-bottom: 0.25rem; }
+  .header-brand h1 { font-family: 'Oswald', sans-serif; font-weight: 700; font-size: 2rem; letter-spacing: 0.05em; text-transform: uppercase; }
+  .header-brand .tag { font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; color: var(--accent-gold); background: rgba(240,182,55,0.12); padding: 0.2em 0.6em; border-radius: 3px; letter-spacing: 0.08em; text-transform: uppercase; }
+  .header-subtitle { color: var(--text-secondary); font-size: 0.95rem; margin-top: 0.15rem; }
+
+  .stats-bar { max-width: 1400px; margin: -1.5rem auto 0; padding: 0 2rem; position: relative; z-index: 2; display: grid; grid-template-columns: repeat(4,1fr); gap: 1rem; }
+  .stat-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 1.1rem 1.25rem; }
+  .stat-card .label { font-family: 'JetBrains Mono', monospace; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); margin-bottom: 0.3rem; }
+  .stat-card .value { font-family: 'Oswald', sans-serif; font-size: 1.5rem; font-weight: 600; }
+  .stat-card .value .unit { font-size: 0.85rem; font-weight: 400; color: var(--text-secondary); }
+
+  .controls { max-width: 1400px; margin: 1.75rem auto 0; padding: 0 2rem; display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; }
+  .search-box { flex: 1; min-width: 220px; position: relative; }
+  .search-box input { width: 100%; background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; padding: 0.65rem 1rem 0.65rem 2.5rem; color: var(--text-primary); font-family: 'Source Sans 3', sans-serif; font-size: 0.9rem; outline: none; transition: border-color 0.2s; }
+  .search-box input:focus { border-color: var(--accent-blue); }
+  .search-box input::placeholder { color: var(--text-muted); }
+  .search-box .icon { position: absolute; left: 0.85rem; top: 50%; transform: translateY(-50%); color: var(--text-muted); font-size: 0.85rem; }
+  .filter-group { display: flex; gap: 0.5rem; align-items: center; }
+  .filter-group label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+  .filter-group select { background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; padding: 0.55rem 2rem 0.55rem 0.75rem; color: var(--text-primary); font-family: 'Source Sans 3', sans-serif; font-size: 0.85rem; cursor: pointer; outline: none; -webkit-appearance: none; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%238892a6'%3E%3Cpath d='M6 8L1 3h10z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 0.7rem center; }
+
+  .table-wrap { max-width: 1400px; margin: 1.5rem auto 3rem; padding: 0 2rem; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  thead th { position: sticky; top: 0; background: var(--bg-secondary); border-bottom: 2px solid var(--accent-gold); padding: 0.6rem 0.5rem; text-align: left; font-family: 'JetBrains Mono', monospace; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); cursor: pointer; white-space: nowrap; user-select: none; }
+  thead th:hover { color: var(--accent-gold); }
+  thead th.sorted-asc::after { content: ' ▲'; color: var(--accent-gold); }
+  thead th.sorted-desc::after { content: ' ▼'; color: var(--accent-gold); }
+  tbody tr { border-bottom: 1px solid rgba(30,45,74,0.5); transition: background 0.15s; }
+  tbody tr:hover { background: var(--bg-row-hover); }
+  td { padding: 0.55rem 0.5rem; white-space: nowrap; }
+  td.rank { font-family: 'Oswald', sans-serif; font-weight: 600; color: var(--text-muted); min-width: 36px; text-align: center; }
+  td.rank.top5 { color: var(--accent-gold); }
+  td.rank.top15 { color: var(--accent-cyan); }
+  td.player { font-weight: 600; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+  td.team { font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--text-secondary); }
+  td.score { font-family: 'Oswald', sans-serif; font-weight: 600; font-size: 1rem; }
+  td.archetype { font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; }
+  td.archetype.interior { color: var(--interior); }
+  td.archetype.perimeter { color: var(--perimeter); }
+  td.archetype.mix { color: var(--mix); }
+  td.num { font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; color: var(--text-secondary); text-align: right; }
+  td.num.good { color: var(--surplus-pos); }
+  td.num.bad { color: var(--surplus-neg); }
+  td.anchor { font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; text-align: right; }
+  td.anchor.pos { color: var(--surplus-pos); }
+  td.anchor.zero { color: var(--text-muted); }
+
+  .score-bar { display: inline-block; height: 6px; border-radius: 3px; background: var(--accent-blue); margin-left: 6px; vertical-align: middle; transition: width 0.3s; }
+
+  .loading { text-align: center; padding: 4rem 2rem; color: var(--text-secondary); }
+  .loading .spinner { display: inline-block; width: 28px; height: 28px; border: 3px solid var(--border); border-top-color: var(--accent-blue); border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 1rem; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .error { text-align: center; padding: 3rem 2rem; color: var(--surplus-neg); }
+
+  .methodology { max-width: 1400px; margin: 0 auto 3rem; padding: 0 2rem; }
+  .methodology details { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; }
+  .methodology summary { padding: 1rem 1.25rem; cursor: pointer; font-family: 'Oswald', sans-serif; font-size: 1.1rem; letter-spacing: 0.03em; color: var(--text-secondary); }
+  .methodology summary:hover { color: var(--text-primary); }
+  .methodology .content { padding: 0 1.25rem 1.25rem; font-size: 0.85rem; color: var(--text-secondary); line-height: 1.7; }
+  .methodology .content h4 { color: var(--accent-gold); font-family: 'Oswald', sans-serif; margin: 1rem 0 0.4rem; font-size: 0.95rem; letter-spacing: 0.04em; }
+  .methodology .content code { font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; background: rgba(59,130,246,0.1); padding: 0.15em 0.4em; border-radius: 3px; }
+
+  .tooltip { position: fixed; background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 0.9rem 1.1rem; font-size: 0.78rem; color: var(--text-secondary); max-width: 320px; z-index: 100; pointer-events: none; box-shadow: 0 8px 24px rgba(0,0,0,0.4); display: none; line-height: 1.6; }
+  .tooltip .tp-name { font-family: 'Oswald', sans-serif; font-size: 1rem; color: var(--text-primary); margin-bottom: 0.4rem; }
+  .tooltip .tp-row { display: flex; justify-content: space-between; gap: 1.5rem; }
+  .tooltip .tp-label { color: var(--text-muted); font-family: 'JetBrains Mono', monospace; font-size: 0.65rem; text-transform: uppercase; }
+  .tooltip .tp-val { font-family: 'JetBrains Mono', monospace; color: var(--text-primary); }
+
+  @media (max-width: 900px) {
+    .stats-bar { grid-template-columns: repeat(2,1fr); }
+    .controls { flex-direction: column; }
+    .header-brand h1 { font-size: 1.5rem; }
+  }
+  @media (max-width: 600px) {
+    .stats-bar { grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+    .table-wrap { padding: 0 0.5rem; }
+    td, th { padding: 0.4rem 0.3rem; }
+  }
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="header-inner">
+    <div class="header-brand">
+      <h1>🛡️ Defensive Rankings</h1>
+      <span class="tag">v3 — Real Anchor</span>
+    </div>
+    <div class="header-subtitle">Archetype-weighted composite score with team defense anchor bonus</div>
+  </div>
+</div>
+
+<div class="stats-bar" id="statsBar">
+  <div class="stat-card"><div class="label">Players Ranked</div><div class="value" id="statPlayers">—</div></div>
+  <div class="stat-card"><div class="label">#1 Defender</div><div class="value" id="statTop">—</div></div>
+  <div class="stat-card"><div class="label">Top Anchor Bonus</div><div class="value" id="statAnchor">—</div></div>
+  <div class="stat-card"><div class="label">Last Updated</div><div class="value" id="statDate">—</div></div>
+</div>
+
+<div class="controls">
+  <div class="search-box">
+    <span class="icon">🔍</span>
+    <input type="text" id="search" placeholder="Search player or team…" oninput="update()">
+  </div>
+  <div class="filter-group">
+    <label>Team</label>
+    <select id="teamFilter" onchange="update()"><option value="">All Teams</option></select>
+  </div>
+  <div class="filter-group">
+    <label>Archetype</label>
+    <select id="archFilter" onchange="update()">
+      <option value="">All</option>
+      <option value="INT">Interior</option>
+      <option value="PER">Perimeter</option>
+      <option value="MIX">Mixed</option>
+    </select>
+  </div>
+  <div class="filter-group">
+    <label>Min GP</label>
+    <select id="gpFilter" onchange="update()">
+      <option value="40">40+</option>
+      <option value="30">30+</option>
+      <option value="20">20+</option>
+      <option value="50">50+</option>
+    </select>
+  </div>
+  <button id="refreshBtn" onclick="refreshData()" style="background:var(--accent-blue);color:#fff;border:none;border-radius:6px;padding:0.55rem 1.2rem;font-family:'Source Sans 3',sans-serif;font-size:0.85rem;font-weight:600;cursor:pointer;">↻ Refresh</button>
+</div>
+
+<div class="table-wrap">
+  <div class="loading" id="loading"><div class="spinner"></div><br>Fetching defensive stats from Google Sheets…</div>
+  <div class="error" id="error" style="display:none"></div>
+  <table id="mainTable" style="display:none">
+    <thead>
+      <tr>
+        <th data-col="rank">#</th>
+        <th data-col="player">Player</th>
+        <th data-col="team">Team</th>
+        <th data-col="score">Score</th>
+        <th data-col="archetype">Type</th>
+        <th data-col="stl">STL/G</th>
+        <th data-col="blk">BLK/G</th>
+        <th data-col="defl">DEFL/G</th>
+        <th data-col="contest">CONT/G</th>
+        <th data-col="dfgpct">OPP FG%</th>
+        <th data-col="dfgdiff">DIFF%</th>
+        <th data-col="drtg">DEF RTG</th>
+        <th data-col="nrtg">NET RTG</th>
+        <th data-col="anchor">Anchor</th>
+        <th data-col="gp">GP</th>
+        <th data-col="mpg">MPG</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+</div>
+
+<div class="methodology">
+  <details>
+    <summary>Methodology — How the Defensive Score Works</summary>
+    <div class="content">
+      <h4>Archetype Detection</h4>
+      Players are classified on a perimeter↔interior spectrum using a sigmoid on BLK/G. High-block bigs get interior weights; guards/wings get perimeter weights. This determines which stats matter most for each player.
+
+      <h4>Interior Formula (weights sum to 100)</h4>
+      <code>DEF FG% DIFF (22)</code> · <code>BLK/G (22)</code> · <code>DEF_RATING (14)</code> · <code>NET_RATING (10)</code> · <code>DEF FG% (10)</code> · <code>CONTESTED/G (8)</code> · <code>STL/G (5)</code> · <code>DEFL/G (5)</code> · <code>REB/G (4)</code>
+
+      <h4>Perimeter Formula (weights sum to 100)</h4>
+      <code>STL/G (22)</code> · <code>DEFL/G (16)</code> · <code>DEF FG% DIFF (12)</code> · <code>PF/G (8)</code> · <code>NET_RATING (8)</code> · <code>WIN (8)</code> · <code>CHARGES/G (6)</code> · <code>DEF FG% (6)</code> · <code>DEF_RATING (6)</code> · <code>MPG (4)</code> · <code>LOOSE BALLS/G (4)</code>
+
+      <h4>Anchor Bonus (up to +18 pts)</h4>
+      Players on top-15 defensive teams (by real team DRTG) earn a bonus scaled by: team rank tier (top-5/10/15), minutes share (25–34+ MPG), scheme factor (player DRTG vs team DRTG), and win factor (vs median).
+
+      <h4>Normalization</h4>
+      All stats are z-scored within the current season pool. The final composite is 0–100 normalized where 100 = best defender in the league.
+    </div>
+  </details>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+// ═══════════════════════════════════════════════════════
+// GOOGLE SHEETS CONFIG
+// ═══════════════════════════════════════════════════════
+const STATS_ID = '1JH2FUBIyQ1zEHzZBxgP8vHBZ7d8EtP5-fSVG3zMgCgg';
+const API_KEY  = 'AIzaSyB9g7c6llswswuZQ2I5y2MwGk6BzYEtHsY';
+const BASE_URL = `https://sheets.googleapis.com/v4/spreadsheets/${STATS_ID}/values`;
+const makeURL  = tab => `${BASE_URL}/${encodeURIComponent(tab)}?key=${API_KEY}`;
+
+const TABS = {
+  trad:    'Player Traditional Totals',
+  adv:     'Player Advanced',
+  hustle:  'Player Hustle',
+  defTrk:  'Def_Tracking_Overall',
+  teamAdv: 'Team Advanced',
+};
+
+// ═══════════════════════════════════════════════════════
+// COLUMN NAME MAPPING: NBA API → Formula
+// ═══════════════════════════════════════════════════════
+// The Google Sheet uses nba_api column names.
+// Map them to the names used in our defensive formula.
+function mapRow(headers, row) {
+  const obj = {};
+  headers.forEach((h, i) => { obj[h] = row[i] !== undefined ? row[i] : ''; });
+  return obj;
+}
+
+function parseSheet(data) {
+  // Row 0 = metadata ("Season: 2025-26 | Last Updated: ..."), Row 1 = headers, Row 2+ = data
+  if (!data.values || data.values.length < 3) return { headers: [], rows: [], meta: '' };
+  const meta = data.values[0][0] || '';
+  const headers = data.values[1].map(h => (h || '').trim());
+  const rows = data.values.slice(2).map(r => mapRow(headers, r));
+  return { headers, rows, meta };
+}
+
+// ═══════════════════════════════════════════════════════
+// DEFENSIVE SCORE v3 FORMULA
+// ═══════════════════════════════════════════════════════
+
+// Archetype: perimeter weight via sigmoid on BLK/G
+function perimeterWeight(blkPg) {
+  return 1.0 / (1.0 + Math.exp(3.0 * (blkPg - 1.0)));
+}
+
+const INTERIOR_FEATURES = {
+  'PCT_PLUSMINUS':     { w: 22, d: -1 },
+  'BLK_PG':            { w: 22, d:  1 },
+  'DEF_RATING':        { w: 14, d: -1 },
+  'NET_RATING':        { w: 10, d:  1 },
+  'D_FG_PCT':          { w: 10, d: -1 },
+  'CONTESTED_SHOTS_PG':{ w:  8, d:  1 },
+  'STL_PG':            { w:  5, d:  1 },
+  'DEFLECTIONS_PG':    { w:  5, d:  1 },
+  'REB_PG':            { w:  4, d:  1 },
+};
+
+const PERIMETER_FEATURES = {
+  'STL_PG':              { w: 22, d:  1 },
+  'DEFLECTIONS_PG':      { w: 16, d:  1 },
+  'PF_PG':               { w:  8, d:  1 },
+  'CHARGES_DRAWN_PG':    { w:  6, d:  1 },
+  'PCT_PLUSMINUS':       { w: 12, d: -1 },
+  'NET_RATING':          { w:  8, d:  1 },
+  'W':                   { w:  8, d:  1 },
+  'D_FG_PCT':            { w:  6, d: -1 },
+  'DEF_RATING':          { w:  6, d: -1 },
+  'MPG':                 { w:  4, d:  1 },
+  'LOOSE_BALLS_RECOVERED_PG': { w: 4, d: 1 },
+};
+
+// Collect all feature keys
+const ALL_FEATURES = new Set();
+for (const f in INTERIOR_FEATURES) ALL_FEATURES.add(f);
+for (const f in PERIMETER_FEATURES) ALL_FEATURES.add(f);
+
+function computeDefensiveScores(players) {
+  // Z-scores for each feature
+  const featureKeys = [...ALL_FEATURES];
+  const means = {}, stds = {};
+  for (const f of featureKeys) {
+    const vals = players.map(p => p[f]).filter(v => v !== null && v !== undefined && !isNaN(v));
+    const n = vals.length;
+    if (n === 0) { means[f] = 0; stds[f] = 1; continue; }
+    const mean = vals.reduce((a,b) => a+b, 0) / n;
+    const variance = vals.reduce((a,v) => a + (v - mean) ** 2, 0) / n;
+    means[f] = mean;
+    stds[f] = Math.sqrt(variance) || 1;
+  }
+
+  for (const p of players) {
+    for (const f of featureKeys) {
+      p[f + '_z'] = (p[f] !== null && p[f] !== undefined && !isNaN(p[f]))
+        ? (p[f] - means[f]) / stds[f]
+        : 0;
+    }
+  }
+
+  // Interior & perimeter raw scores
+  for (const p of players) {
+    let intScore = 0;
+    for (const [f, {w, d}] of Object.entries(INTERIOR_FEATURES)) {
+      intScore += w * d * (p[f + '_z'] || 0);
+    }
+    let perScore = 0;
+    for (const [f, {w, d}] of Object.entries(PERIMETER_FEATURES)) {
+      perScore += w * d * (p[f + '_z'] || 0);
+    }
+    p.INTERIOR_RAW = intScore;
+    p.PERIMETER_RAW = perScore;
+    p.BASE_RAW = p.PERIM_W * perScore + (1 - p.PERIM_W) * intScore;
+  }
+
+  // Anchor bonus using real team DRTG
+  const medianWins = median(players.map(p => p.W || 0));
+  for (const p of players) {
+    p.ANCHOR_BONUS = computeAnchorBonus(p, medianWins);
+  }
+
+  // Final raw = base + anchor
+  for (const p of players) {
+    p.FINAL_RAW = p.BASE_RAW + p.ANCHOR_BONUS;
+  }
+
+  // Normalize to 0-100
+  const rawVals = players.map(p => p.FINAL_RAW);
+  const rawMin = Math.min(...rawVals);
+  const rawMax = Math.max(...rawVals);
+  const range = rawMax - rawMin || 1;
+  for (const p of players) {
+    p.DEF_SCORE = 100 * (p.FINAL_RAW - rawMin) / range;
+  }
+
+  // Rank
+  players.sort((a, b) => b.DEF_SCORE - a.DEF_SCORE);
+  players.forEach((p, i) => p.RANK = i + 1);
+}
+
+function computeAnchorBonus(player, medianWins) {
+  const rank = player.TEAM_DEF_RANK;
+  if (!rank || rank > 15) return 0;
+
+  // Team defense tier
+  let teamFactor;
+  if (rank <= 5) teamFactor = 1.0;
+  else if (rank <= 10) teamFactor = 0.5;
+  else teamFactor = 0.25;
+
+  // Minutes factor: 0 at 25 MPG → 1.0 at 34+
+  const minFactor = Math.max(0, Math.min(1.0, (player.MPG - 25) / 9));
+
+  // Scheme factor: player DRTG vs team DRTG
+  const teamDrtg = player.TEAM_DEF_RATING;
+  const playerDrtg = player.DEF_RATING;
+  let schemeFactor = 0.5;
+  if (teamDrtg && playerDrtg) {
+    const diff = teamDrtg - playerDrtg; // positive = player better
+    schemeFactor = Math.max(0.15, Math.min(1.0, 0.5 + diff / 8));
+  }
+
+  // Win factor
+  const wins = player.W || 0;
+  const winFactor = Math.max(0.3, Math.min(1.0, 0.5 + (wins - medianWins) / 25));
+
+  const MAX_BONUS = 18;
+  return MAX_BONUS * teamFactor * minFactor * schemeFactor * winFactor;
+}
+
+function median(arr) {
+  if (arr.length === 0) return 0;
+  const sorted = [...arr].sort((a,b) => a-b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid-1] + sorted[mid]) / 2;
+}
+
+// ═══════════════════════════════════════════════════════
+// DATA LOADING & JOINING
+// ═══════════════════════════════════════════════════════
+let appData = null;
+
+async function refreshData() {
+  const btn = document.getElementById('refreshBtn');
+  btn.textContent = '⏳ Loading…';
+  btn.disabled = true;
+  document.getElementById('loading').style.display = 'block';
+  document.getElementById('mainTable').style.display = 'none';
+  document.getElementById('error').style.display = 'none';
+
+  try {
+    const [tradRes, advRes, hustleRes, defTrkRes, teamAdvRes] = await Promise.all(
+      Object.values(TABS).map(tab => fetch(makeURL(tab)).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status} for ${tab}`); return r.json(); }))
+    );
+
+    const trad    = parseSheet(tradRes);
+    const adv     = parseSheet(advRes);
+    const hustle  = parseSheet(hustleRes);
+    const defTrk  = parseSheet(defTrkRes);
+    const teamAdv = parseSheet(teamAdvRes);
+
+    // Extract last updated from metadata
+    const metaMatch = (trad.meta || '').match(/Last Updated:\s*(.+)/);
+    const lastUpdated = metaMatch ? metaMatch[1].trim() : 'Unknown';
+
+    // Build team defense lookup: team abbreviation → { drtg, rank }
+    const teamDefMap = {};
+    const teamRows = teamAdv.rows
+      .map(r => ({ team: r.TEAM_ABBREVIATION || r.TEAM_ABB || '', drtg: parseFloat(r.DEF_RATING) || 999 }))
+      .filter(r => r.team && r.drtg < 999);
+    teamRows.sort((a, b) => a.drtg - b.drtg);
+    teamRows.forEach((t, i) => { teamDefMap[t.team] = { drtg: t.drtg, rank: i + 1 }; });
+
+    // Build lookup maps for adv, hustle, defTrk by PLAYER_NAME + TEAM_ABBREVIATION
+    function buildLookup(rows, nameCol = 'PLAYER_NAME', teamCol = 'TEAM_ABBREVIATION') {
+      const map = {};
+      for (const r of rows) {
+        const name = (r[nameCol] || '').trim();
+        // Try multiple possible team column names
+        const team = (r[teamCol] || r['TEAM_ABBREVIATION'] || r['TEAM_ABB'] || r['PLAYER_LAST_TEAM_ABBREVIATION'] || '').trim();
+        if (name) {
+          map[name + '|' + team] = r;
+          // Also store name-only key as fallback for cross-tab joins
+          if (!map[name + '|']) map[name + '|'] = r;
+        }
+      }
+      return map;
+    }
+
+    function lookupPlayer(lookupMap, name, team) {
+      return lookupMap[name + '|' + team] || lookupMap[name + '|'] || {};
+    }
+
+    const advMap     = buildLookup(adv.rows);
+    const hustleMap  = buildLookup(hustle.rows);
+    // Def tracking uses PLAYER_LAST_TEAM_ABBREVIATION instead of TEAM_ABBREVIATION
+    const defTrkMap  = buildLookup(defTrk.rows, 'PLAYER_NAME', 'PLAYER_LAST_TEAM_ABBREVIATION');
+
+    // Process traditional stats → base player records
+    const MIN_GP  = 20;
+    const MIN_MPG = 20;
+    const players = [];
+
+    for (const r of trad.rows) {
+      const name = (r.PLAYER_NAME || '').trim();
+      const team = (r.TEAM_ABBREVIATION || r.TEAM_ABB || '').trim();
+      if (!name || !team) continue;
+
+      const gp  = parseInt(r.GP) || 0;
+      const min = parseFloat(r.MIN) || 0;
+      const mpg = gp > 0 ? min / gp : 0;
+      if (gp < MIN_GP || mpg < MIN_MPG) continue;
+
+      const key = name + '|' + team;
+      const advR     = lookupPlayer(advMap, name, team);
+      const hustleR  = lookupPlayer(hustleMap, name, team);
+      const defTrkR  = lookupPlayer(defTrkMap, name, team);
+      const teamDef  = teamDefMap[team] || {};
+
+      const p = {
+        PLAYER: name,
+        TEAM: team,
+        GP: gp,
+        MPG: mpg,
+        // Per-game counting stats
+        STL_PG: gp > 0 ? (parseFloat(r.STL) || 0) / gp : 0,
+        BLK_PG: gp > 0 ? (parseFloat(r.BLK) || 0) / gp : 0,
+        REB_PG: gp > 0 ? (parseFloat(r.REB) || 0) / gp : 0,
+        PF_PG:  gp > 0 ? (parseFloat(r.PF)  || 0) / gp : 0,
+        W: parseFloat(r.W) || 0,
+        // Advanced
+        DEF_RATING: parseFloat(advR.DEF_RATING) || null,
+        NET_RATING: parseFloat(advR.NET_RATING) || null,
+        // Hustle per-game
+        DEFLECTIONS_PG:    gp > 0 ? (parseFloat(hustleR.DEFLECTIONS)           || 0) / gp : 0,
+        CONTESTED_SHOTS_PG:gp > 0 ? (parseFloat(hustleR.CONTESTED_SHOTS)      || 0) / gp : 0,
+        CHARGES_DRAWN_PG:  gp > 0 ? (parseFloat(hustleR.CHARGES_DRAWN)        || 0) / gp : 0,
+        LOOSE_BALLS_RECOVERED_PG: gp > 0 ? (parseFloat(hustleR.LOOSE_BALLS_RECOVERED) || 0) / gp : 0,
+        // Def tracking
+        D_FG_PCT:       parseFloat(defTrkR.D_FG_PCT) || null,
+        PCT_PLUSMINUS:   parseFloat(defTrkR.PCT_PLUSMINUS) || null,
+        // Team defense
+        TEAM_DEF_RATING: teamDef.drtg || null,
+        TEAM_DEF_RANK:   teamDef.rank || null,
+      };
+
+      // Archetype
+      p.PERIM_W = perimeterWeight(p.BLK_PG);
+
+      // Validate: need at least the core features
+      if (p.DEF_RATING === null && p.D_FG_PCT === null) continue;
+
+      players.push(p);
+    }
+
+    if (players.length === 0) throw new Error('No players found after filtering. Check GP/MPG thresholds.');
+
+    // Compute scores
+    computeDefensiveScores(players);
+
+    appData = { players, lastUpdated, teamDefMap };
+    buildStats();
+    buildTeamFilter();
+    update();
+
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('mainTable').style.display = '';
+
+  } catch (err) {
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('error').style.display = 'block';
+    document.getElementById('error').textContent = `Error: ${err.message}`;
+    console.error(err);
+  }
+  btn.textContent = '↻ Refresh';
+  btn.disabled = false;
+}
+
+function buildStats() {
+  if (!appData) return;
+  const p = appData.players;
+  document.getElementById('statPlayers').textContent = p.length;
+  document.getElementById('statTop').textContent = p[0] ? p[0].PLAYER : '—';
+  const topAnchor = p.reduce((max, pl) => pl.ANCHOR_BONUS > max.ANCHOR_BONUS ? pl : max, p[0]);
+  document.getElementById('statAnchor').innerHTML = topAnchor
+    ? `+${topAnchor.ANCHOR_BONUS.toFixed(1)} <span class="unit">${topAnchor.PLAYER.split(' ').pop()}</span>`
+    : '—';
+  document.getElementById('statDate').innerHTML = `<span class="unit">${appData.lastUpdated}</span>`;
+}
+
+function buildTeamFilter() {
+  if (!appData) return;
+  const sel = document.getElementById('teamFilter');
+  const teams = [...new Set(appData.players.map(p => p.TEAM))].sort();
+  sel.innerHTML = '<option value="">All Teams</option>';
+  for (const t of teams) {
+    sel.innerHTML += `<option value="${t}">${t}</option>`;
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// RENDERING
+// ═══════════════════════════════════════════════════════
+let sortCol = 'rank', sortAsc = true;
+
+function update() {
+  if (!appData) return;
+  let filtered = [...appData.players];
+
+  // Filters
+  const search = document.getElementById('search').value.toLowerCase();
+  const teamF  = document.getElementById('teamFilter').value;
+  const archF  = document.getElementById('archFilter').value;
+  const gpF    = parseInt(document.getElementById('gpFilter').value) || 40;
+
+  if (search) filtered = filtered.filter(p => p.PLAYER.toLowerCase().includes(search) || p.TEAM.toLowerCase().includes(search));
+  if (teamF)  filtered = filtered.filter(p => p.TEAM === teamF);
+  if (archF === 'INT') filtered = filtered.filter(p => p.PERIM_W <= 0.4);
+  if (archF === 'PER') filtered = filtered.filter(p => p.PERIM_W > 0.6);
+  if (archF === 'MIX') filtered = filtered.filter(p => p.PERIM_W > 0.4 && p.PERIM_W <= 0.6);
+  if (gpF !== 40) filtered = filtered.filter(p => p.GP >= gpF);
+
+  // Sort
+  const col = sortCol;
+  filtered.sort((a, b) => {
+    let va, vb;
+    switch (col) {
+      case 'rank':    va = a.RANK; vb = b.RANK; break;
+      case 'player':  va = a.PLAYER; vb = b.PLAYER; return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+      case 'team':    va = a.TEAM; vb = b.TEAM; return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+      case 'score':   va = a.DEF_SCORE; vb = b.DEF_SCORE; break;
+      case 'stl':     va = a.STL_PG; vb = b.STL_PG; break;
+      case 'blk':     va = a.BLK_PG; vb = b.BLK_PG; break;
+      case 'defl':    va = a.DEFLECTIONS_PG; vb = b.DEFLECTIONS_PG; break;
+      case 'contest': va = a.CONTESTED_SHOTS_PG; vb = b.CONTESTED_SHOTS_PG; break;
+      case 'dfgpct':  va = a.D_FG_PCT||0; vb = b.D_FG_PCT||0; break;
+      case 'dfgdiff': va = a.PCT_PLUSMINUS||0; vb = b.PCT_PLUSMINUS||0; break;
+      case 'drtg':    va = a.DEF_RATING||999; vb = b.DEF_RATING||999; break;
+      case 'nrtg':    va = a.NET_RATING||0; vb = b.NET_RATING||0; break;
+      case 'anchor':  va = a.ANCHOR_BONUS; vb = b.ANCHOR_BONUS; break;
+      case 'gp':      va = a.GP; vb = b.GP; break;
+      case 'mpg':     va = a.MPG; vb = b.MPG; break;
+      default:        va = a.RANK; vb = b.RANK;
+    }
+    return sortAsc ? va - vb : vb - va;
+  });
+
+  // Render
+  const tbody = document.getElementById('tbody');
+  tbody.innerHTML = '';
+  for (const p of filtered) {
+    const archLabel = p.PERIM_W > 0.6 ? 'PER' : p.PERIM_W <= 0.4 ? 'INT' : 'MIX';
+    const archClass = p.PERIM_W > 0.6 ? 'perimeter' : p.PERIM_W <= 0.4 ? 'interior' : 'mix';
+    const rankClass = p.RANK <= 5 ? 'top5' : p.RANK <= 15 ? 'top15' : '';
+    const barW = Math.round(p.DEF_SCORE * 0.8);
+    const dfgDiff = p.PCT_PLUSMINUS !== null ? (p.PCT_PLUSMINUS * 100) : null;
+    const anchorClass = p.ANCHOR_BONUS > 0.1 ? 'pos' : 'zero';
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="rank ${rankClass}">${p.RANK}</td>
+      <td class="player">${p.PLAYER}</td>
+      <td class="team">${p.TEAM}</td>
+      <td class="score">${p.DEF_SCORE.toFixed(1)}<span class="score-bar" style="width:${barW}px"></span></td>
+      <td class="archetype ${archClass}">${archLabel}</td>
+      <td class="num">${p.STL_PG.toFixed(2)}</td>
+      <td class="num">${p.BLK_PG.toFixed(2)}</td>
+      <td class="num">${p.DEFLECTIONS_PG.toFixed(1)}</td>
+      <td class="num">${p.CONTESTED_SHOTS_PG.toFixed(1)}</td>
+      <td class="num">${p.D_FG_PCT !== null ? (p.D_FG_PCT * 100).toFixed(1) + '%' : '—'}</td>
+      <td class="num ${dfgDiff !== null ? (dfgDiff < 0 ? 'good' : 'bad') : ''}">${dfgDiff !== null ? (dfgDiff >= 0 ? '+' : '') + dfgDiff.toFixed(1) + '%' : '—'}</td>
+      <td class="num">${p.DEF_RATING !== null ? p.DEF_RATING.toFixed(1) : '—'}</td>
+      <td class="num ${p.NET_RATING > 0 ? 'good' : p.NET_RATING < 0 ? 'bad' : ''}">${p.NET_RATING !== null ? (p.NET_RATING >= 0 ? '+' : '') + p.NET_RATING.toFixed(1) : '—'}</td>
+      <td class="anchor ${anchorClass}">${p.ANCHOR_BONUS > 0.1 ? '+' + p.ANCHOR_BONUS.toFixed(1) : '—'}</td>
+      <td class="num">${p.GP}</td>
+      <td class="num">${p.MPG.toFixed(1)}</td>
+    `;
+    // Tooltip on hover
+    tr.addEventListener('mouseenter', e => showTooltip(e, p));
+    tr.addEventListener('mousemove', e => moveTooltip(e));
+    tr.addEventListener('mouseleave', hideTooltip);
+    tbody.appendChild(tr);
+  }
+
+  // Update header sort indicators
+  document.querySelectorAll('thead th').forEach(th => {
+    th.classList.remove('sorted-asc', 'sorted-desc');
+    if (th.dataset.col === sortCol) {
+      th.classList.add(sortAsc ? 'sorted-asc' : 'sorted-desc');
+    }
+  });
+}
+
+// Column sort
+document.querySelectorAll('thead th').forEach(th => {
+  th.addEventListener('click', () => {
+    const col = th.dataset.col;
+    if (sortCol === col) {
+      sortAsc = !sortAsc;
+    } else {
+      sortCol = col;
+      // Default sort directions
+      sortAsc = ['rank', 'player', 'team', 'dfgpct', 'dfgdiff', 'drtg'].includes(col);
+    }
+    update();
+  });
+});
+
+// ═══════════════════════════════════════════════════════
+// TOOLTIP
+// ═══════════════════════════════════════════════════════
+function showTooltip(e, p) {
+  const tt = document.getElementById('tooltip');
+  const archLabel = p.PERIM_W > 0.6 ? 'Perimeter' : p.PERIM_W <= 0.4 ? 'Interior' : 'Mixed';
+  const teamRank = p.TEAM_DEF_RANK ? `#${p.TEAM_DEF_RANK}` : '—';
+  const teamDrtg = p.TEAM_DEF_RATING ? p.TEAM_DEF_RATING.toFixed(1) : '—';
+  tt.innerHTML = `
+    <div class="tp-name">${p.PLAYER} · ${p.TEAM}</div>
+    <div class="tp-row"><span class="tp-label">Archetype</span><span class="tp-val">${archLabel} (${(p.PERIM_W * 100).toFixed(0)}% perim)</span></div>
+    <div class="tp-row"><span class="tp-label">Def Score</span><span class="tp-val">${p.DEF_SCORE.toFixed(1)} / 100</span></div>
+    <div class="tp-row"><span class="tp-label">Base Raw</span><span class="tp-val">${p.BASE_RAW.toFixed(1)}</span></div>
+    <div class="tp-row"><span class="tp-label">Anchor Bonus</span><span class="tp-val">${p.ANCHOR_BONUS > 0.1 ? '+' + p.ANCHOR_BONUS.toFixed(1) : 'None'}</span></div>
+    <div class="tp-row"><span class="tp-label">Team Defense</span><span class="tp-val">${teamRank} (${teamDrtg} DRTG)</span></div>
+    <div class="tp-row"><span class="tp-label">Charges / Loose Balls</span><span class="tp-val">${p.CHARGES_DRAWN_PG.toFixed(2)} / ${p.LOOSE_BALLS_RECOVERED_PG.toFixed(2)} per game</span></div>
+  `;
+  tt.style.display = 'block';
+  moveTooltip(e);
+}
+
+function moveTooltip(e) {
+  const tt = document.getElementById('tooltip');
+  const x = Math.min(e.clientX + 14, window.innerWidth - 340);
+  const y = Math.min(e.clientY + 14, window.innerHeight - 220);
+  tt.style.left = x + 'px';
+  tt.style.top = y + 'px';
+}
+
+function hideTooltip() {
+  document.getElementById('tooltip').style.display = 'none';
+}
+
+// ═══════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════
+refreshData();
+</script>
+</body>
+</html>
