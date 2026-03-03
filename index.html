@@ -118,7 +118,7 @@
   <div class="header-inner">
     <div class="header-brand">
       <h1>🛡️ Defensive Rankings</h1>
-      <span class="tag">v3.6 — Real Anchor</span>
+      <span class="tag">v3.7 — Real Anchor</span>
     </div>
     <div class="header-subtitle">Archetype-weighted composite score with team defense anchor bonus</div>
   </div>
@@ -141,14 +141,12 @@
     <select id="teamFilter" onchange="update()"><option value="">All Teams</option></select>
   </div>
   <div class="filter-group">
-    <label>Min Total Minutes</label>
-    <select id="minFilter" onchange="update()">
-      <option value="1000">1000+</option>
-      <option value="750">750+</option>
-      <option value="500">500+</option>
-      <option value="250">250+</option>
-      <option value="1250">1250+</option>
-      <option value="1500">1500+</option>
+    <label>Min GP</label>
+    <select id="gpFilter" onchange="update()">
+      <option value="40">40+</option>
+      <option value="30">30+</option>
+      <option value="20">20+</option>
+      <option value="50">50+</option>
       <option value="0">All Players</option>
     </select>
   </div>
@@ -174,7 +172,6 @@
         <th data-col="drtg">DEF RTG</th>
         <th data-col="gp">GP</th>
         <th data-col="mpg">MPG</th>
-        <th data-col="totalmin">TOT MIN</th>
       </tr>
     </thead>
     <tbody id="tbody"></tbody>
@@ -690,11 +687,11 @@ function update() {
   // Filters
   const search = document.getElementById('search').value.toLowerCase();
   const teamF  = document.getElementById('teamFilter').value;
-  const minF   = parseInt(document.getElementById('minFilter').value) || 0;
+  const gpF    = parseInt(document.getElementById('gpFilter').value) || 0;
 
   if (search) filtered = filtered.filter(p => p.PLAYER.toLowerCase().includes(search) || p.TEAM.toLowerCase().includes(search));
   if (teamF)  filtered = filtered.filter(p => p.TEAM === teamF);
-  if (minF > 0) filtered = filtered.filter(p => p.TOTAL_MIN >= minF);
+  if (gpF > 0) filtered = filtered.filter(p => p.GP >= gpF);
 
   // Sort
   const col = sortCol;
@@ -714,7 +711,6 @@ function update() {
       case 'drtg':    va = a.DEF_RATING||999; vb = b.DEF_RATING||999; break;
       case 'gp':      va = a.GP; vb = b.GP; break;
       case 'mpg':     va = a.MPG; vb = b.MPG; break;
-      case 'totalmin': va = a.TOTAL_MIN; vb = b.TOTAL_MIN; break;
       default:        va = a.RANK; vb = b.RANK;
     }
     return sortAsc ? va - vb : vb - va;
@@ -743,7 +739,6 @@ function update() {
       <td class="num">${p.DEF_RATING !== null ? p.DEF_RATING.toFixed(1) : '—'}</td>
       <td class="num">${p.GP}</td>
       <td class="num">${p.MPG.toFixed(1)}</td>
-      <td class="num">${Math.round(p.TOTAL_MIN).toLocaleString()}</td>
     `;
     // Tooltip on hover
     tr.addEventListener('mouseenter', e => showTooltip(e, p));
