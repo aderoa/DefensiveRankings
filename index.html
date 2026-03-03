@@ -118,7 +118,7 @@
   <div class="header-inner">
     <div class="header-brand">
       <h1>🛡️ Defensive Rankings</h1>
-      <span class="tag">v4.3 — Real Anchor</span>
+      <span class="tag">v4.4 — Real Anchor</span>
     </div>
     <div class="header-subtitle">Archetype-weighted composite score with team defense anchor bonus</div>
   </div>
@@ -796,7 +796,7 @@ function update() {
       case 'drtg':    va = a.DEF_RATING||999; vb = b.DEF_RATING||999; break;
       case 'gp':      va = a.GP; vb = b.GP; break;
       case 'mpg':     va = a.MPG; vb = b.MPG; break;
-      case 'spm':     va = a.MPG>0?a.DEF_SCORE/a.MPG:0; vb = b.MPG>0?b.DEF_SCORE/b.MPG:0; break;
+      case 'spm':     va = a.MPG>0?a.DEF_SCORE_RAW/a.MPG:0; vb = b.MPG>0?b.DEF_SCORE_RAW/b.MPG:0; break;
       default:        va = a.RANK; vb = b.RANK;
     }
     return sortAsc ? va - vb : vb - va;
@@ -828,7 +828,7 @@ function update() {
       <td class="num">${p.DEF_RATING !== null ? p.DEF_RATING.toFixed(1) : '—'}</td>
       <td class="num">${p.GP}</td>
       <td class="num">${p.MPG.toFixed(1)}</td>
-      <td class="num">${p.MPG > 0 ? (p.DEF_SCORE / p.MPG).toFixed(2) : '—'}</td>
+      <td class="num">${p.MPG > 0 ? (p.DEF_SCORE_RAW / p.MPG).toFixed(2) : '—'}</td>
     `;
     // Tooltip on hover
     tr.addEventListener('mouseenter', e => showTooltip(e, p));
