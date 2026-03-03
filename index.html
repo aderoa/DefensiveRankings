@@ -118,7 +118,7 @@
   <div class="header-inner">
     <div class="header-brand">
       <h1>🛡️ Defensive Rankings</h1>
-      <span class="tag">v4.2 — Real Anchor</span>
+      <span class="tag">v4.3 — Real Anchor</span>
     </div>
     <div class="header-subtitle">Archetype-weighted composite score with team defense anchor bonus</div>
   </div>
@@ -415,12 +415,10 @@ function computeDefensiveScores(players) {
   }
 
   // ═══ ADJUSTMENT 1: Games Played Availability ═══
-  // gpRatio = player GP / team GP (1.0 = played every game)
-  // Prorated score = raw × gpRatio, then average with raw
-  // Result: full availability → no change, half games → 25% penalty
+  // Direct proration: score × (playerGP / teamGP)
   for (const p of players) {
     p.GP_RATIO = (p.TEAM_GP > 0) ? Math.min(1.0, p.GP / p.TEAM_GP) : 1.0;
-    p.DEF_SCORE_GP = p.DEF_SCORE_RAW * (1.0 + p.GP_RATIO) / 2.0;
+    p.DEF_SCORE_GP = p.DEF_SCORE_RAW * p.GP_RATIO;
   }
 
   // ═══ ADJUSTMENT 2: Per-Minute Efficiency Bonus ═══
@@ -876,7 +874,7 @@ function showTooltip(e, p) {
     <div class="tp-row"><span class="tp-label">Archetype</span><span class="tp-val">${archLabel} (${(p.PERIM_W * 100).toFixed(0)}% perim)</span></div>
     <div class="tp-row"><span class="tp-label">Def Score</span><span class="tp-val">${p.DEF_SCORE.toFixed(1)}</span></div>
     <div class="tp-row"><span class="tp-label">Base Raw</span><span class="tp-val">${p.DEF_SCORE_RAW.toFixed(1)}</span></div>
-    <div class="tp-row"><span class="tp-label">GP Avail.</span><span class="tp-val">${p.GP}/${p.TEAM_GP} (${(p.GP_RATIO * 100).toFixed(0)}%) → ×${((1 + p.GP_RATIO) / 2).toFixed(3)}</span></div>
+    <div class="tp-row"><span class="tp-label">GP Avail.</span><span class="tp-val">${p.GP}/${p.TEAM_GP} (${(p.GP_RATIO * 100).toFixed(0)}%) → ×${p.GP_RATIO.toFixed(3)}</span></div>
     <div class="tp-row"><span class="tp-label">Efficiency</span><span class="tp-val">${p.EFF_Z >= 0 ? '+' : ''}${p.EFF_Z.toFixed(2)}σ → ×${p.EFF_MULT.toFixed(3)}</span></div>
     <div class="tp-row"><span class="tp-label">Anchor Bonus</span><span class="tp-val">${p.ANCHOR_BONUS > 0.1 ? '+' + p.ANCHOR_BONUS.toFixed(1) : 'None'}</span></div>
     <div class="tp-row"><span class="tp-label">Team Defense</span><span class="tp-val">${teamRank} (${teamDrtg} DRTG)</span></div>
