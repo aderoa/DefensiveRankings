@@ -118,7 +118,7 @@
   <div class="header-inner">
     <div class="header-brand">
       <h1>🛡️ Defensive Rankings</h1>
-      <span class="tag">v3.9 — Real Anchor</span>
+      <span class="tag">v4.1 — Real Anchor</span>
     </div>
     <div class="header-subtitle">Archetype-weighted composite score with team defense anchor bonus</div>
   </div>
@@ -172,6 +172,7 @@
         <th data-col="drtg">DEF RTG</th>
         <th data-col="gp">GP</th>
         <th data-col="mpg">MPG</th>
+        <th data-col="spm">SC/MPG</th>
       </tr>
     </thead>
     <tbody id="tbody"></tbody>
@@ -357,11 +358,13 @@ for (const f in INTERIOR_FEATURES) ALL_FEATURES.add(f);
 for (const f in PERIMETER_FEATURES) ALL_FEATURES.add(f);
 
 function computeDefensiveScores(players) {
-  // Z-scores for each feature
+  // Z-scores computed from QUALIFIED pool only (GP>=20, MPG>=20)
+  // to match historical data distribution. Applied to all players.
+  const qualified = players.filter(p => p.GP >= 20 && p.MPG >= 20);
   const featureKeys = [...ALL_FEATURES];
   const means = {}, stds = {};
   for (const f of featureKeys) {
-    const vals = players.map(p => p[f]).filter(v => v !== null && v !== undefined && !isNaN(v));
+    const vals = qualified.map(p => p[f]).filter(v => v !== null && v !== undefined && !isNaN(v));
     const n = vals.length;
     if (n === 0) { means[f] = 0; stds[f] = 1; continue; }
     const mean = vals.reduce((a,b) => a+b, 0) / n;
@@ -735,7 +738,7 @@ function buildTeamFilter() {
 // ═══════════════════════════════════════════════════════
 // RENDERING
 // ═══════════════════════════════════════════════════════
-let sortCol = 'rank', sortAsc = true;
+let sortCol = 'rank', sortAsc = false;
 
 function update() {
   if (!appData) return;
@@ -755,7 +758,7 @@ function update() {
   filtered.sort((a, b) => {
     let va, vb;
     switch (col) {
-      case 'rank':    va = a.RANK; vb = b.RANK; break;
+      case 'rank':    va = a.DEF_SCORE; vb = b.DEF_SCORE; return sortAsc ? va - vb : vb - va;
       case 'player':  va = a.PLAYER; vb = b.PLAYER; return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
       case 'team':    va = a.TEAM; vb = b.TEAM; return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
       case 'score':   va = a.DEF_SCORE; vb = b.DEF_SCORE; break;
@@ -768,6 +771,7 @@ function update() {
       case 'drtg':    va = a.DEF_RATING||999; vb = b.DEF_RATING||999; break;
       case 'gp':      va = a.GP; vb = b.GP; break;
       case 'mpg':     va = a.MPG; vb = b.MPG; break;
+      case 'spm':     va = a.MPG>0?a.DEF_SCORE/a.MPG:0; vb = b.MPG>0?b.DEF_SCORE/b.MPG:0; break;
       default:        va = a.RANK; vb = b.RANK;
     }
     return sortAsc ? va - vb : vb - va;
@@ -777,14 +781,16 @@ function update() {
   const tbody = document.getElementById('tbody');
   tbody.innerHTML = '';
   const maxScore = filtered.length > 0 ? Math.max(...filtered.map(p => p.DEF_SCORE)) : 35;
-  for (const p of filtered) {
-    const rankClass = p.RANK <= 5 ? 'top5' : p.RANK <= 15 ? 'top15' : '';
+  for (let idx = 0; idx < filtered.length; idx++) {
+    const p = filtered[idx];
+    const rank = idx + 1;
+    const rankClass = rank <= 5 ? 'top5' : rank <= 15 ? 'top15' : '';
     const barW = Math.round((p.DEF_SCORE / maxScore) * 80);
     const dfgDiff = p.PCT_PLUSMINUS !== null ? (p.PCT_PLUSMINUS * 100) : null;
 
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td class="rank ${rankClass}">${p.RANK}</td>
+      <td class="rank ${rankClass}">${rank}</td>
       <td class="player">${p.PLAYER}</td>
       <td class="team">${p.TEAM}</td>
       <td class="score">${p.DEF_SCORE.toFixed(1)}<span class="score-bar" style="width:${barW}px"></span></td>
@@ -797,6 +803,7 @@ function update() {
       <td class="num">${p.DEF_RATING !== null ? p.DEF_RATING.toFixed(1) : '—'}</td>
       <td class="num">${p.GP}</td>
       <td class="num">${p.MPG.toFixed(1)}</td>
+      <td class="num">${p.MPG > 0 ? (p.DEF_SCORE / p.MPG).toFixed(2) : '—'}</td>
     `;
     // Tooltip on hover
     tr.addEventListener('mouseenter', e => showTooltip(e, p));
@@ -823,7 +830,7 @@ document.querySelectorAll('thead th').forEach(th => {
     } else {
       sortCol = col;
       // Default sort directions
-      sortAsc = ['rank', 'player', 'team', 'dfgpct', 'dfgdiff', 'drtg'].includes(col);
+      sortAsc = ['player', 'team', 'dfgpct', 'dfgdiff', 'drtg'].includes(col);
     }
     update();
   });
