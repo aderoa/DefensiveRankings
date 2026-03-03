@@ -118,7 +118,7 @@
   <div class="header-inner">
     <div class="header-brand">
       <h1>🛡️ Defensive Rankings</h1>
-      <span class="tag">v3.4 — Real Anchor</span>
+      <span class="tag">v3.5 — Real Anchor</span>
     </div>
     <div class="header-subtitle">Archetype-weighted composite score with team defense anchor bonus</div>
   </div>
@@ -500,28 +500,28 @@ async function refreshData() {
     const lastUpdated = metaMatch ? metaMatch[1].trim() : 'Unknown';
 
     // Build team defense lookup: team abbreviation → { drtg, rank }
-    const teamDefMap = {};
-    console.log('TeamAdv headers:', teamAdv.headers);
-    if (teamAdv.rows[0]) console.log('TeamAdv row 0 keys:', Object.keys(teamAdv.rows[0]));
-    if (teamAdv.rows[0]) console.log('TeamAdv row 0 sample:', JSON.stringify(teamAdv.rows[0]).slice(0, 500));
-
-    // Auto-detect the team abbreviation column
-    let teamAbbrCol = null, teamDrtgCol = null;
-    for (const h of teamAdv.headers) {
-      const hu = h.toUpperCase();
-      if (!teamAbbrCol && (hu.includes('ABBREVIATION') || hu === 'TEAM_ABB' || hu === 'TEAM')) teamAbbrCol = h;
-      if (!teamDrtgCol && (hu === 'DEF_RATING' || hu === 'DRTG' || hu === 'DEF_RTG' || hu === 'DEFRTG')) teamDrtgCol = h;
+    // Team Advanced has TEAM_NAME ("Atlanta Hawks") but no abbreviation column.
+    // Players have abbreviations ("ATL"). Build a bridge from player data.
+    const teamNameToAbbr = {};
+    for (const r of trad.rows) {
+      const abbr = resolveCol(r, 'TEAM_ABBREVIATION', 'TEAM_ABB').trim();
+      const id   = resolveCol(r, 'TEAM_ID').trim();
+      if (abbr && id) teamNameToAbbr[id] = abbr;
     }
-    console.log('Team col detection: abbr =', teamAbbrCol, ', drtg =', teamDrtgCol);
+    console.log('Team ID→Abbr map:', teamNameToAbbr);
 
+    const teamDefMap = {};
     const teamRows = teamAdv.rows
-      .map(r => ({
-        team: (teamAbbrCol ? r[teamAbbrCol] : resolveCol(r, 'TEAM_ABBREVIATION', 'TEAM_ABB', 'ABBREVIATION', 'TEAM')).trim(),
-        drtg: parseNum(teamDrtgCol ? r[teamDrtgCol] : resolveCol(r, 'DEF_RATING', 'DRTG', 'DEF_RTG'))
-      }))
+      .map(r => {
+        const id   = resolveCol(r, 'TEAM_ID').trim();
+        const name = resolveCol(r, 'TEAM_NAME').trim();
+        const abbr = teamNameToAbbr[id] || '';
+        const drtg = parseNum(resolveCol(r, 'DEF_RATING', 'DRTG', 'DEF_RTG'));
+        return { team: abbr, name, drtg };
+      })
       .filter(r => r.team && r.drtg !== null && r.drtg < 999);
     teamRows.sort((a, b) => a.drtg - b.drtg);
-    teamRows.forEach((t, i) => { teamDefMap[t.team] = { drtg: t.drtg, rank: i + 1 }; });
+    teamRows.forEach((t, i) => { teamDefMap[t.team] = { drtg: t.drtg, rank: i + 1, name: t.name }; });
 
     console.log('Team defense map:', Object.keys(teamDefMap).length, 'teams', teamDefMap);
 
