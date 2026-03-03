@@ -122,7 +122,7 @@
   <div class="header-inner">
     <div class="header-brand">
       <h1>🛡️ Defensive Rankings</h1>
-      <span class="tag">v5.1 — Real Anchor</span>
+      <span class="tag">v5.2 — Real Anchor</span>
     </div>
     <div class="header-subtitle">Archetype-weighted composite score with team defense anchor bonus</div>
   </div>
@@ -216,41 +216,10 @@ const API_KEY  = 'AIzaSyB9g7c6llswswuZQ2I5y2MwGk6BzYEtHsY';
 const BASE_URL = `https://sheets.googleapis.com/v4/spreadsheets/${STATS_ID}/values`;
 const makeURL  = tab => `${BASE_URL}/${encodeURIComponent(tab)}?key=${API_KEY}`;
 
-const TABS = {
-  trad:    'Player Traditional Totals',
-  adv:     'Player Advanced',
-  hustle:  'Player Hustle',
-  defTrk:  'Def_Tracking_Overall',
-  teamAdv: 'Team Advanced',
-};
-
 // Nomenclature sheet: maps NBA API names → HoopsMatic names
-// Lives in Daily Stats spreadsheet (different from Season Stats)
 const NOMEN_PUB = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vS2iZj3avZ_-CAWKu-f_pxZkf38M0quXQwMbyTXmHsN6-c9V8vU1l_sNaxg0y8dl07dqraU3_5Z3b8D/pub';
-const NOMEN_GID = '1197809522'; // col L=NBA NAME, col M=HH NAME
+const NOMEN_GID = '1197809522';
 const NOMEN_URL = `${NOMEN_PUB}?gid=${NOMEN_GID}&single=true&output=csv`;
-
-// ═══════════════════════════════════════════════════════
-// COLUMN NAME MAPPING: NBA API → Formula
-// ═══════════════════════════════════════════════════════
-// The Google Sheet uses nba_api column names.
-// Map them to the names used in our defensive formula.
-function mapRow(headers, row) {
-  const obj = {};
-  headers.forEach((h, i) => { obj[h] = row[i] !== undefined ? row[i] : ''; });
-  return obj;
-}
-
-// ═══════════════════════════════════════════════════════
-// COLUMN AUTO-RESOLVER
-// Handles NBA API naming variants across different endpoints
-// ═══════════════════════════════════════════════════════
-function resolveCol(row, ...candidates) {
-  for (const c of candidates) {
-    if (row[c] !== undefined && row[c] !== '') return row[c];
-  }
-  return '';
-}
 
 function parseNum(v) {
   if (v === undefined || v === null || v === '') return null;
@@ -281,213 +250,8 @@ function parseCSV(text) {
   return rows;
 }
 
-function parseSheet(data) {
-  // Sheet layout from nba_season_stats.py:
-  //   A1 (index 0): "Season: 2025-26 | Last Updated: ..."
-  //   A2 (index 1): BLANK ROW
-  //   A3 (index 2): Column headers
-  //   A4+ (index 3+): Data rows
-  // But blank rows may or may not be returned by the API,
-  // so we scan for the header row dynamically.
-  if (!data.values || data.values.length < 2) return { headers: [], rows: [], meta: '' };
-  
-  let meta = '';
-  let headerIdx = -1;
-  
-  // Find the header row: first row with 3+ non-empty cells that isn't metadata
-  for (let i = 0; i < Math.min(data.values.length, 5); i++) {
-    const row = data.values[i];
-    const firstCell = (row[0] || '').trim();
-    
-    // Metadata row
-    if (firstCell.toLowerCase().startsWith('season') || firstCell.includes('Updated')) {
-      meta = firstCell;
-      continue;
-    }
-    
-    // Skip empty/near-empty rows
-    const nonEmpty = row.filter(c => (c || '').trim() !== '').length;
-    if (nonEmpty < 3) continue;
-    
-    // This looks like headers
-    headerIdx = i;
-    break;
-  }
-  
-  if (headerIdx < 0) return { headers: [], rows: [], meta };
-  
-  const headers = data.values[headerIdx].map(h => (h || '').trim());
-  const rows = data.values.slice(headerIdx + 1).map(r => mapRow(headers, r));
-  return { headers, rows, meta };
-}
-
 // ═══════════════════════════════════════════════════════
-// DEFENSIVE SCORE v3 FORMULA
-// ═══════════════════════════════════════════════════════
-
-// Archetype: perimeter weight via sigmoid on BLK/G
-function perimeterWeight(blkPg) {
-  return 1.0 / (1.0 + Math.exp(3.0 * (blkPg - 1.0)));
-}
-
-const INTERIOR_FEATURES = {
-  'PCT_PLUSMINUS':     { w: 22, d: -1 },
-  'BLK_PG':            { w: 22, d:  1 },
-  'DEF_RATING':        { w: 14, d: -1 },
-  'NET_RATING':        { w: 10, d:  1 },
-  'D_FG_PCT':          { w: 10, d: -1 },
-  'CONTESTED_SHOTS_PG':{ w:  8, d:  1 },
-  'STL_PG':            { w:  5, d:  1 },
-  'DEFLECTIONS_PG':    { w:  5, d:  1 },
-  'REB_PG':            { w:  4, d:  1 },
-};
-
-const PERIMETER_FEATURES = {
-  'STL_PG':              { w: 22, d:  1 },
-  'DEFLECTIONS_PG':      { w: 16, d:  1 },
-  'PF_PG':               { w:  8, d:  1 },
-  'CHARGES_DRAWN_PG':    { w:  6, d:  1 },
-  'PCT_PLUSMINUS':       { w: 12, d: -1 },
-  'NET_RATING':          { w:  8, d:  1 },
-  'W':                   { w:  8, d:  1 },
-  'D_FG_PCT':            { w:  6, d: -1 },
-  'DEF_RATING':          { w:  6, d: -1 },
-  'MPG':                 { w:  4, d:  1 },
-  'LOOSE_BALLS_RECOVERED_PG': { w: 4, d: 1 },
-};
-
-// Collect all feature keys
-const ALL_FEATURES = new Set();
-for (const f in INTERIOR_FEATURES) ALL_FEATURES.add(f);
-for (const f in PERIMETER_FEATURES) ALL_FEATURES.add(f);
-
-function computeDefensiveScores(players) {
-  // Z-scores computed from QUALIFIED pool only (GP>=20, MPG>=20)
-  // to match historical data distribution. Applied to all players.
-  const qualified = players.filter(p => p.GP >= 20 && p.MPG >= 20);
-  const featureKeys = [...ALL_FEATURES];
-  const means = {}, stds = {};
-  for (const f of featureKeys) {
-    const vals = qualified.map(p => p[f]).filter(v => v !== null && v !== undefined && !isNaN(v));
-    const n = vals.length;
-    if (n === 0) { means[f] = 0; stds[f] = 1; continue; }
-    const mean = vals.reduce((a,b) => a+b, 0) / n;
-    const variance = vals.reduce((a,v) => a + (v - mean) ** 2, 0) / n;
-    means[f] = mean;
-    stds[f] = Math.sqrt(variance) || 1;
-  }
-
-  for (const p of players) {
-    for (const f of featureKeys) {
-      p[f + '_z'] = (p[f] !== null && p[f] !== undefined && !isNaN(p[f]))
-        ? (p[f] - means[f]) / stds[f]
-        : 0;
-    }
-  }
-
-  // Interior & perimeter raw scores
-  for (const p of players) {
-    let intScore = 0;
-    for (const [f, {w, d}] of Object.entries(INTERIOR_FEATURES)) {
-      intScore += w * d * (p[f + '_z'] || 0);
-    }
-    let perScore = 0;
-    for (const [f, {w, d}] of Object.entries(PERIMETER_FEATURES)) {
-      perScore += w * d * (p[f + '_z'] || 0);
-    }
-    p.INTERIOR_RAW = intScore;
-    p.PERIMETER_RAW = perScore;
-    p.BASE_RAW = p.PERIM_W * perScore + (1 - p.PERIM_W) * intScore;
-  }
-
-  // Anchor bonus using real team DRTG
-  const medianWins = median(players.map(p => p.W || 0));
-  for (const p of players) {
-    p.ANCHOR_BONUS = computeAnchorBonus(p, medianWins);
-  }
-
-  // Final raw = base + anchor
-  for (const p of players) {
-    p.FINAL_RAW = p.BASE_RAW + p.ANCHOR_BONUS;
-  }
-
-  // Organic scoring: fixed linear transform on raw composite
-  const SCORE_SCALE = 0.07;
-  const SCORE_BASELINE = 14.5;
-  for (const p of players) {
-    p.DEF_SCORE_RAW = Math.max(0, p.FINAL_RAW * SCORE_SCALE + SCORE_BASELINE);
-  }
-
-  // ═══ ADJUSTMENT 1: Games Played Availability ═══
-  // Half-strength proration: score × (0.5 + 0.5 × gpRatio)
-  // Full games = ×1.0, half games = ×0.75 (instead of ×0.5)
-  for (const p of players) {
-    p.GP_RATIO = (p.TEAM_GP > 0) ? Math.min(1.0, p.GP / p.TEAM_GP) : 1.0;
-    p.DEF_SCORE_GP = p.DEF_SCORE_RAW * (0.5 + 0.5 * p.GP_RATIO);
-  }
-
-  // ═══ ADJUSTMENT 2: Per-Minute Efficiency Bonus ═══
-  // Z-score SC/MPG (using raw score, before GP adjustment) across the pool
-  // Then apply as a small multiplier on the GP-adjusted score
-  const scPerMin = players.map(p => p.MPG > 0 ? p.DEF_SCORE_RAW / p.MPG : 0);
-  const effMean = scPerMin.reduce((a, b) => a + b, 0) / scPerMin.length;
-  const effStd = Math.sqrt(scPerMin.reduce((a, v) => a + (v - effMean) ** 2, 0) / scPerMin.length) || 1;
-  const EFF_WEIGHT = 0.08;
-
-  for (let i = 0; i < players.length; i++) {
-    const p = players[i];
-    const effZ = (scPerMin[i] - effMean) / effStd;
-    p.EFF_Z = effZ;
-    p.SC_MPG = scPerMin[i];
-    p.EFF_MULT = 1.0 + EFF_WEIGHT * effZ;
-    p.EFF_MULT = Math.max(0.85, Math.min(1.20, p.EFF_MULT));
-    p.DEF_SCORE = Math.max(0, p.DEF_SCORE_GP * p.EFF_MULT);
-  }
-
-  // Rank
-  players.sort((a, b) => b.DEF_SCORE - a.DEF_SCORE);
-  players.forEach((p, i) => p.RANK = i + 1);
-}
-
-function computeAnchorBonus(player, medianWins) {
-  const rank = player.TEAM_DEF_RANK;
-  if (!rank || rank > 15) return 0;
-
-  // Team defense tier
-  let teamFactor;
-  if (rank <= 5) teamFactor = 1.0;
-  else if (rank <= 10) teamFactor = 0.5;
-  else teamFactor = 0.25;
-
-  // Minutes factor: 0 at 25 MPG → 1.0 at 34+
-  const minFactor = Math.max(0, Math.min(1.0, (player.MPG - 25) / 9));
-
-  // Scheme factor: player DRTG vs team DRTG
-  const teamDrtg = player.TEAM_DEF_RATING;
-  const playerDrtg = player.DEF_RATING;
-  let schemeFactor = 0.5;
-  if (teamDrtg && playerDrtg) {
-    const diff = teamDrtg - playerDrtg; // positive = player better
-    schemeFactor = Math.max(0.15, Math.min(1.0, 0.5 + diff / 8));
-  }
-
-  // Win factor
-  const wins = player.W || 0;
-  const winFactor = Math.max(0.3, Math.min(1.0, 0.5 + (wins - medianWins) / 25));
-
-  const MAX_BONUS = 18;
-  return MAX_BONUS * teamFactor * minFactor * schemeFactor * winFactor;
-}
-
-function median(arr) {
-  if (arr.length === 0) return 0;
-  const sorted = [...arr].sort((a,b) => a-b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[mid] : (sorted[mid-1] + sorted[mid]) / 2;
-}
-
-// ═══════════════════════════════════════════════════════
-// DATA LOADING & JOINING
+// DATA LOADING — single pre-computed tab
 // ═══════════════════════════════════════════════════════
 let appData = null;
 
@@ -500,46 +264,45 @@ async function refreshData() {
   document.getElementById('error').style.display = 'none';
 
   try {
-    // Fetch tabs sequentially with delay to avoid 429 rate limits
-    async function fetchTab(tab, retries = 3) {
-      for (let attempt = 0; attempt < retries; attempt++) {
-        const res = await fetch(makeURL(tab));
-        if (res.ok) return res.json();
-        if (res.status === 429) {
-          const wait = (attempt + 1) * 2000; // 2s, 4s, 6s backoff
-          console.log(`Rate limited on '${tab}', retrying in ${wait}ms...`);
-          await new Promise(r => setTimeout(r, wait));
-          continue;
-        }
-        throw new Error(`HTTP ${res.status} for ${tab}`);
-      }
-      throw new Error(`Failed after ${retries} retries for '${tab}'`);
-    }
-
-    const tabKeys = Object.keys(TABS);
-    const tabResults = {};
     const loadEl = document.getElementById('loading');
-    for (let i = 0; i < tabKeys.length; i++) {
-      const key = tabKeys[i];
-      loadEl.innerHTML = `<div class="spinner"></div><br>Fetching ${TABS[key]}… (${i+1}/${tabKeys.length})`;
-      tabResults[key] = await fetchTab(TABS[key]);
-      // Small delay between requests
-      if (i < tabKeys.length - 1) await new Promise(r => setTimeout(r, 500));
+    loadEl.innerHTML = `<div class="spinner"></div><br>Fetching Defensive Rankings…`;
+
+    // Single fetch: pre-computed Defensive Rankings tab
+    const res = await fetch(makeURL('Defensive Rankings'));
+    if (!res.ok) throw new Error(`HTTP ${res.status} fetching Defensive Rankings`);
+    const data = await res.json();
+
+    if (!data.values || data.values.length < 3) throw new Error('No data in Defensive Rankings tab');
+
+    // Parse: row 0 = metadata, find header row, then data
+    let meta = '', headerIdx = -1;
+    for (let i = 0; i < Math.min(data.values.length, 5); i++) {
+      const row = data.values[i];
+      const firstCell = (row[0] || '').trim();
+      if (firstCell.toLowerCase().startsWith('season') || firstCell.includes('Updated')) {
+        meta = firstCell; continue;
+      }
+      const nonEmpty = row.filter(c => (c || '').trim() !== '').length;
+      if (nonEmpty < 3) continue;
+      headerIdx = i; break;
     }
+    if (headerIdx < 0) throw new Error('Could not find header row');
 
-    const [tradRes, advRes, hustleRes, defTrkRes, teamAdvRes] =
-      [tabResults.trad, tabResults.adv, tabResults.hustle, tabResults.defTrk, tabResults.teamAdv];
+    const headers = data.values[headerIdx].map(h => (h || '').trim());
+    const colIdx = {};
+    headers.forEach((h, i) => { colIdx[h] = i; });
 
-    // Fetch nomenclature (NBA NAME → HH NAME) from Daily Stats spreadsheet
-    loadEl.innerHTML = `<div class="spinner"></div><br>Fetching nomenclature…`;
-    let nameMap = {}; // NBA NAME → HH NAME
+    const metaMatch = (meta || '').match(/Last Updated:\s*(.+)/);
+    const lastUpdated = metaMatch ? metaMatch[1].trim() : 'Unknown';
+
+    // Fetch nomenclature for name mapping
+    loadEl.innerHTML = `<div class="spinner"></div><br>Applying nomenclature…`;
+    let nameMap = {};
     try {
       const nomenRes = await fetch(NOMEN_URL);
       if (nomenRes.ok) {
         const csvText = await nomenRes.text();
         const csvRows = parseCSV(csvText);
-        // Col L (index 11) = NBA NAME, Col M (index 12) = HH NAME
-        // Skip rows that look like headers/metadata
         for (const row of csvRows) {
           const nbaName = (row[11] || '').trim();
           const hhName  = (row[12] || '').trim();
@@ -547,185 +310,60 @@ async function refreshData() {
             nameMap[nbaName] = hhName;
           }
         }
-        console.log(`Nomenclature loaded: ${Object.keys(nameMap).length} player name mappings`);
-        if (Object.keys(nameMap).length > 0) {
-          const sample = Object.entries(nameMap).slice(0, 3);
-          console.log('Name map sample:', sample);
-        }
+        console.log(`Nomenclature: ${Object.keys(nameMap).length} mappings`);
       }
-    } catch (e) {
-      console.warn('Nomenclature fetch failed (non-fatal):', e.message);
-    }
-    loadEl.innerHTML = `<div class="spinner"></div><br>Processing data…`;
+    } catch (e) { console.warn('Nomenclature fetch failed (non-fatal):', e.message); }
 
-    const trad    = parseSheet(tradRes);
-    const adv     = parseSheet(advRes);
-    const hustle  = parseSheet(hustleRes);
-    const defTrk  = parseSheet(defTrkRes);
-    const teamAdv = parseSheet(teamAdvRes);
-
-    console.log('=== DEFENSIVE RANKINGS DEBUG ===');
-    console.log('Trad:', trad.headers.length, 'cols,', trad.rows.length, 'rows. Headers:', trad.headers.slice(0,10));
-    console.log('Adv:', adv.headers.length, 'cols,', adv.rows.length, 'rows. Headers:', adv.headers.slice(0,10));
-    console.log('Hustle:', hustle.headers.length, 'cols,', hustle.rows.length, 'rows');
-    console.log('DefTrk:', defTrk.headers.length, 'cols,', defTrk.rows.length, 'rows. Headers:', defTrk.headers);
-    console.log('TeamAdv:', teamAdv.headers.length, 'cols,', teamAdv.rows.length, 'rows');
-    if (trad.rows[0]) console.log('Trad row 0 sample:', { PLAYER_NAME: trad.rows[0].PLAYER_NAME, TEAM_ABBREVIATION: trad.rows[0].TEAM_ABBREVIATION, GP: trad.rows[0].GP, MIN: trad.rows[0].MIN, STL: trad.rows[0].STL });
-
-    // Extract last updated from metadata
-    const metaMatch = (trad.meta || '').match(/Last Updated:\s*(.+)/);
-    const lastUpdated = metaMatch ? metaMatch[1].trim() : 'Unknown';
-
-    // Build team defense lookup: team abbreviation → { drtg, rank }
-    // Team Advanced has TEAM_NAME ("Atlanta Hawks") but no abbreviation column.
-    // Players have abbreviations ("ATL"). Build a bridge from player data.
-    const teamNameToAbbr = {};
-    for (const r of trad.rows) {
-      const abbr = resolveCol(r, 'TEAM_ABBREVIATION', 'TEAM_ABB').trim();
-      const id   = resolveCol(r, 'TEAM_ID').trim();
-      if (abbr && id) teamNameToAbbr[id] = abbr;
-    }
-    console.log('Team ID→Abbr map:', teamNameToAbbr);
-
-    const teamDefMap = {};
-    const teamRows = teamAdv.rows
-      .map(r => {
-        const id   = resolveCol(r, 'TEAM_ID').trim();
-        const name = resolveCol(r, 'TEAM_NAME').trim();
-        const abbr = teamNameToAbbr[id] || '';
-        const drtg = parseNum(resolveCol(r, 'DEF_RATING', 'DRTG', 'DEF_RTG'));
-        const gp   = parseNum(resolveCol(r, 'GP', 'G')) || 0;
-        return { team: abbr, name, drtg, gp };
-      })
-      .filter(r => r.team && r.drtg !== null && r.drtg < 999);
-    teamRows.sort((a, b) => a.drtg - b.drtg);
-    teamRows.forEach((t, i) => { teamDefMap[t.team] = { drtg: t.drtg, rank: i + 1, name: t.name, gp: t.gp }; });
-
-    console.log('Team defense map:', Object.keys(teamDefMap).length, 'teams', teamDefMap);
-
-    // Build lookup maps for adv, hustle, defTrk by player name + team
-    function buildLookup(rows) {
-      const map = {};
-      for (const r of rows) {
-        const name = resolveCol(r, 'PLAYER_NAME', 'PLAYER', 'Player').trim();
-        const team = resolveCol(r, 'TEAM_ABBREVIATION', 'TEAM_ABB', 'PLAYER_LAST_TEAM_ABBREVIATION', 'ABBREVIATION').trim();
-        if (name) {
-          map[name + '|' + team] = r;
-          if (!map[name]) map[name] = r; // name-only fallback
-        }
-      }
-      return map;
-    }
-
-    function lookupPlayer(lookupMap, name, team) {
-      return lookupMap[name + '|' + team] || lookupMap[name] || {};
-    }
-
-    const advMap     = buildLookup(adv.rows);
-    const hustleMap  = buildLookup(hustle.rows);
-    const defTrkMap  = buildLookup(defTrk.rows);
-
-    // Process traditional stats → base player records
-    // No hard GP/MPG filter here — let the UI minutes filter handle it
+    // Build player array from pre-computed data
     const players = [];
-    let skippedNoName = 0, skippedNoDefData = 0;
+    const get = (row, col) => {
+      const i = colIdx[col];
+      return i !== undefined ? (row[i] || '') : '';
+    };
 
-    for (const r of trad.rows) {
-      const name = resolveCol(r, 'PLAYER_NAME', 'PLAYER', 'Player').trim();
-      const team = resolveCol(r, 'TEAM_ABBREVIATION', 'TEAM_ABB', 'ABBREVIATION').trim();
-      if (!name || !team) { skippedNoName++; continue; }
-
-      const gp  = parseNum(resolveCol(r, 'GP', 'G', 'Games')) || 0;
-      const min = parseNum(resolveCol(r, 'MIN', 'Minutes')) || 0;
-      const mpg = gp > 0 ? min / gp : 0;
-      if (gp < 1) { continue; } // need at least 1 game
-
-      const advR     = lookupPlayer(advMap, name, team);
-      const hustleR  = lookupPlayer(hustleMap, name, team);
-      const defTrkR  = lookupPlayer(defTrkMap, name, team);
-      const teamDef  = teamDefMap[team] || {};
-
-      // Hustle GP might differ — use it for hustle per-game calcs
-      const hustleGP = parseNum(resolveCol(hustleR, 'G', 'GP')) || gp;
+    for (let r = headerIdx + 1; r < data.values.length; r++) {
+      const row = data.values[r];
+      const name = get(row, 'PLAYER').trim();
+      const team = get(row, 'TEAM').trim();
+      if (!name || !team) continue;
 
       const p = {
-        PLAYER: nameMap[name] || name, // Use HH nomenclature if available
-        PLAYER_NBA: name, // Keep original for lookups
+        PLAYER: nameMap[name] || name,
+        PLAYER_NBA: name,
         TEAM: team,
-        GP: gp,
-        MPG: mpg,
-        TOTAL_MIN: min,
-        // Per-game counting stats from Traditional Totals
-        STL_PG: gp > 0 ? (parseNum(resolveCol(r, 'STL')) || 0) / gp : 0,
-        BLK_PG: gp > 0 ? (parseNum(resolveCol(r, 'BLK')) || 0) / gp : 0,
-        REB_PG: gp > 0 ? (parseNum(resolveCol(r, 'REB')) || 0) / gp : 0,
-        PF_PG:  gp > 0 ? (parseNum(resolveCol(r, 'PF'))  || 0) / gp : 0,
-        W: parseNum(resolveCol(r, 'W', 'WIN', 'WINS')) || 0,
-        // Advanced
-        DEF_RATING: parseNum(resolveCol(advR, 'DEF_RATING', 'DRTG', 'DEF_RTG')),
-        NET_RATING: parseNum(resolveCol(advR, 'NET_RATING', 'NRTG', 'NET_RTG')),
-        // Hustle per-game (using hustle GP)
-        DEFLECTIONS_PG:    hustleGP > 0 ? (parseNum(resolveCol(hustleR, 'DEFLECTIONS', 'DEFL'))           || 0) / hustleGP : 0,
-        CONTESTED_SHOTS_PG:hustleGP > 0 ? (parseNum(resolveCol(hustleR, 'CONTESTED_SHOTS', 'CONT_SHOTS')) || 0) / hustleGP : 0,
-        CHARGES_DRAWN_PG:  hustleGP > 0 ? (parseNum(resolveCol(hustleR, 'CHARGES_DRAWN'))                 || 0) / hustleGP : 0,
-        LOOSE_BALLS_RECOVERED_PG: hustleGP > 0 ? (parseNum(resolveCol(hustleR, 'LOOSE_BALLS_RECOVERED', 'LOOSE_BALLS')) || 0) / hustleGP : 0,
-        // Def tracking
-        D_FG_PCT:       parseNum(resolveCol(defTrkR, 'D_FG_PCT', 'DFG_PCT')),
-        PCT_PLUSMINUS:   parseNum(resolveCol(defTrkR, 'PCT_PLUSMINUS', 'PLUSMINUS_PCT', 'PLUS_MINUS')),
-        // Team defense
-        TEAM_DEF_RATING: teamDef.drtg || null,
-        TEAM_DEF_RANK:   teamDef.rank || null,
-        TEAM_GP:         teamDef.gp || 0,
+        GP: parseInt(get(row, 'GP')) || 0,
+        MPG: parseFloat(get(row, 'MPG')) || 0,
+        DEF_SCORE: parseFloat(get(row, 'DEF_SCORE')) || 0,
+        DEF_SCORE_RAW: parseFloat(get(row, 'DEF_SCORE_RAW')) || 0,
+        STL_PG: parseFloat(get(row, 'STL_PG')) || 0,
+        BLK_PG: parseFloat(get(row, 'BLK_PG')) || 0,
+        DEFLECTIONS_PG: parseFloat(get(row, 'DEFLECTIONS_PG')) || 0,
+        CONTESTED_SHOTS_PG: parseFloat(get(row, 'CONTESTED_SHOTS_PG')) || 0,
+        D_FG_PCT: parseNum(get(row, 'D_FG_PCT')),
+        PCT_PLUSMINUS: parseNum(get(row, 'PCT_PLUSMINUS')),
+        DEF_RATING: parseNum(get(row, 'DEF_RATING')),
+        PERIM_W: parseFloat(get(row, 'PERIM_W')) || 0.5,
+        ANCHOR_BONUS: parseFloat(get(row, 'ANCHOR_BONUS')) || 0,
+        TEAM_DEF_RANK: parseInt(get(row, 'TEAM_DEF_RANK')) || null,
+        TEAM_DEF_RATING: parseNum(get(row, 'TEAM_DEF_RATING')),
+        GP_RATIO: parseFloat(get(row, 'GP_RATIO')) || 1,
+        EFF_MULT: parseFloat(get(row, 'EFF_MULT')) || 1,
+        SC_MPG: parseFloat(get(row, 'SC_MPG')) || 0,
+        TEAM_GP: parseInt(get(row, 'TEAM_GP')) || 82,
       };
-
-      // Archetype
-      p.PERIM_W = perimeterWeight(p.BLK_PG);
-
-      // Validate: need at least some defensive data to score
-      if (p.DEF_RATING === null && p.D_FG_PCT === null) { skippedNoDefData++; continue; }
-
-      players.push(p);
+      if (p.GP >= 1) players.push(p);
     }
 
-    console.log(`Player processing: ${players.length} passed, ${skippedNoName} no name, ${skippedNoDefData} no def data`);
-    
-    // Debug: check team matching
-    if (players.length > 0) {
-      const playerTeams = [...new Set(players.map(p => p.TEAM))].sort();
-      const mapTeams = Object.keys(teamDefMap).sort();
-      const matched = playerTeams.filter(t => teamDefMap[t]);
-      const unmatched = playerTeams.filter(t => !teamDefMap[t]);
-      console.log(`Team matching: ${matched.length} matched, ${unmatched.length} unmatched`);
-      if (unmatched.length > 0) console.log('Unmatched player teams:', unmatched);
-      if (mapTeams.length > 0) console.log('Map teams sample:', mapTeams.slice(0, 5));
-      // Check anchor-eligible players
-      const withRank = players.filter(p => p.TEAM_DEF_RANK && p.TEAM_DEF_RANK <= 15);
-      console.log(`Anchor-eligible players (top-15 team): ${withRank.length}`);
-    }
+    // Sort by DEF_SCORE descending
+    players.sort((a, b) => b.DEF_SCORE - a.DEF_SCORE);
+    players.forEach((p, i) => p.RANK = i + 1);
 
-    if (players.length === 0) {
-      // Diagnostic: show what columns we actually received
-      const diag = [];
-      diag.push('=== COLUMN DIAGNOSTICS ===');
-      diag.push(`Trad: ${trad.rows.length} rows, headers: [${trad.headers.join(', ')}]`);
-      diag.push(`Adv: ${adv.rows.length} rows, headers: [${adv.headers.join(', ')}]`);
-      diag.push(`Hustle: ${hustle.rows.length} rows, headers: [${hustle.headers.join(', ')}]`);
-      diag.push(`DefTrk: ${defTrk.rows.length} rows, headers: [${defTrk.headers.join(', ')}]`);
-      diag.push(`TeamAdv: ${teamAdv.rows.length} rows, headers: [${teamAdv.headers.join(', ')}]`);
-      diag.push(`Skipped: ${skippedNoName} no-name, ${skippedNoDefData} no-def-data`);
-      if (trad.rows[0]) diag.push(`Sample trad row keys: [${Object.keys(trad.rows[0]).join(', ')}]`);
-      if (trad.rows[0]) diag.push(`Sample trad row vals: PLAYER_NAME=${trad.rows[0].PLAYER_NAME}, GP=${trad.rows[0].GP}, MIN=${trad.rows[0].MIN}`);
-      if (adv.rows[0]) diag.push(`Sample adv row: DEF_RATING=${adv.rows[0].DEF_RATING}`);
-      if (defTrk.rows[0]) diag.push(`Sample defTrk keys: [${Object.keys(defTrk.rows[0]).join(', ')}]`);
-      const msg = diag.join('\n');
-      console.error(msg);
-      throw new Error(msg);
-    }
+    console.log(`Loaded ${players.length} players from pre-computed tab`);
+    if (players[0]) console.log(`#1: ${players[0].PLAYER} (${players[0].DEF_SCORE})`);
 
-    // Compute scores
-    computeDefensiveScores(players);
+    if (players.length === 0) throw new Error('No players found in Defensive Rankings tab');
 
-    appData = { players, lastUpdated, teamDefMap };
+    appData = { players, lastUpdated, teamDefMap: {} };
     buildStats();
     buildTeamFilter();
     update();
