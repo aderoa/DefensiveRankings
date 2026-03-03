@@ -1,1012 +1,546 @@
-"""
-NBA Season Stats Fetcher
-Fetches FULL SEASON cumulative stats (not daily snapshots)
-Updates Google Sheet with comprehensive season statistics
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NBA Defensive Rankings — Hoopsmatic</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f5f5f7;
+    --surface: #ffffff;
+    --card: #ffffff;
+    --border: #d1d1d6;
+    --border-light: #e5e5ea;
+    --text: #1d1d1f;
+    --text-secondary: #6e6e73;
+    --text-muted: #aeaeb2;
+    --accent: #3b82f6;
+    --accent2: #2563eb;
+    --accent-dim: rgba(59,130,246,0.1);
+    --green: #34c759;
+    --red: #ff453a;
+    --gold: #f59e0b;
+    --cyan: #0ea5e9;
+    --green-dim: rgba(52,199,89,0.12);
+    --red-dim: rgba(255,69,58,0.12);
+    --interior: #dc6843;
+    --perimeter: #3b82f6;
+    --mix: #8b5cf6;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; min-height: 100vh; line-height: 1.5; }
 
-Google Sheet: https://docs.google.com/spreadsheets/d/1JH2FUBIyQ1zEHzZBxgP8vHBZ7d8EtP5-fSVG3zMgCgg/edit
-"""
+  .header { background: linear-gradient(135deg, var(--accent), var(--accent2)); padding: 1.5rem 2rem 1.25rem; position: relative; overflow: hidden; }
+  .header::before { content: ''; position: absolute; top:0;left:0;right:0;bottom:0; background: repeating-linear-gradient(90deg,transparent,transparent 80px,rgba(255,255,255,0.04) 80px,rgba(255,255,255,0.04) 81px); pointer-events: none; }
+  .header-inner { max-width: 1400px; margin: 0 auto; position: relative; z-index: 1; }
+  .header-brand { display: flex; align-items: baseline; gap: 0.75rem; margin-bottom: 0.15rem; }
+  .header-brand h1 { font-weight: 700; font-size: 1.5rem; letter-spacing: -0.02em; color: #fff; }
+  .header-brand .tag { font-family: 'DM Mono', monospace; font-size: 0.65rem; color: rgba(255,255,255,0.8); background: rgba(255,255,255,0.18); padding: 0.2em 0.6em; border-radius: 4px; letter-spacing: 0.04em; }
+  .header-subtitle { color: rgba(255,255,255,0.75); font-size: 0.85rem; }
 
-from nba_api.stats.endpoints import (
-    # Player Stats
-    LeagueDashPlayerStats,
-    LeagueDashPlayerClutch,
-    LeagueDashPlayerBioStats,
-    LeagueHustleStatsPlayer,
-    LeagueDashPtDefend,
-    LeagueDashPlayerPtShot,
-    LeagueDashPlayerShotLocations,
-    LeagueLeaders,
-    PlayerEstimatedMetrics,
-    # Team Stats
-    LeagueDashTeamStats,
-    LeagueDashTeamClutch,
-    LeagueHustleStatsTeam,
-    TeamEstimatedMetrics,
-    LeagueStandingsV3,
-    # Lineups
-    LeagueDashLineups,
-    # Play Types
-    SynergyPlayTypes,
-    # All-Time
-    AllTimeLeadersGrids
-)
-import pandas as pd
-from datetime import datetime
-import os
-import sys
-import time
-import random
-import gspread
-from google.oauth2.service_account import Credentials
+  .stats-bar { max-width: 1400px; margin: -1rem auto 0; padding: 0 2rem; position: relative; z-index: 2; display: grid; grid-template-columns: repeat(4,1fr); gap: 0.75rem; }
+  .stat-card { background: var(--card); border: 1px solid var(--border-light); border-radius: 12px; padding: 1rem 1.15rem; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+  .stat-card .label { font-family: 'DM Mono', monospace; font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 0.2rem; }
+  .stat-card .value { font-size: 1.25rem; font-weight: 700; color: var(--text); }
+  .stat-card .value .unit { font-size: 0.8rem; font-weight: 400; color: var(--text-secondary); }
 
-# Fix encoding for Windows Task Scheduler
-if sys.platform == 'win32':
-    sys.stdout.reconfigure(encoding='utf-8')
+  .controls { max-width: 1400px; margin: 1.25rem auto 0; padding: 0 2rem; display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; }
+  .search-box { flex: 1; min-width: 220px; position: relative; }
+  .search-box input { width: 100%; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem 1rem 0.6rem 2.3rem; color: var(--text); font-family: inherit; font-size: 0.85rem; outline: none; transition: border-color 0.2s; }
+  .search-box input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+  .search-box input::placeholder { color: var(--text-muted); }
+  .search-box .icon { position: absolute; left: 0.75rem; top: 50%; transform: translateY(-50%); color: var(--text-muted); font-size: 0.8rem; }
+  .filter-group { display: flex; gap: 0.4rem; align-items: center; }
+  .filter-group label { font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
+  .filter-group select { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem 2rem 0.5rem 0.7rem; color: var(--text); font-family: inherit; font-size: 0.82rem; cursor: pointer; outline: none; -webkit-appearance: none; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%236e6e73'%3E%3Cpath d='M6 8L1 3h10z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 0.6rem center; }
+  .filter-group select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
 
-# Rate limiting - NBA API is sensitive to rapid requests
-API_DELAY = 1.5  # seconds between API calls (increased from 1.0)
+  .table-wrap { max-width: 1400px; margin: 1.25rem auto 3rem; padding: 0 2rem; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+  thead th { position: sticky; top: 0; background: var(--bg); border-bottom: 2px solid var(--accent); padding: 0.55rem 0.5rem; text-align: left; font-family: 'DM Mono', monospace; font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); cursor: pointer; white-space: nowrap; user-select: none; }
+  thead th:hover { color: var(--accent); }
+  thead th.sorted-asc::after { content: ' ▲'; color: var(--accent); }
+  thead th.sorted-desc::after { content: ' ▼'; color: var(--accent); }
+  tbody tr { border-bottom: 1px solid var(--border-light); transition: background 0.15s; }
+  tbody tr:hover { background: var(--accent-dim); }
+  td { padding: 0.5rem 0.5rem; white-space: nowrap; }
+  td.rank { font-weight: 700; color: var(--text-muted); min-width: 32px; text-align: center; }
+  td.rank.top5 { color: var(--gold); }
+  td.rank.top15 { color: var(--cyan); }
+  td.player { font-weight: 600; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+  td.team { font-family: 'DM Mono', monospace; font-size: 0.72rem; color: var(--text-secondary); }
+  td.score { font-weight: 700; font-size: 0.95rem; }
+  td.archetype { font-family: 'DM Mono', monospace; font-size: 0.68rem; }
+  td.archetype.interior { color: var(--interior); }
+  td.archetype.perimeter { color: var(--perimeter); }
+  td.archetype.mix { color: var(--mix); }
+  td.num { font-family: 'DM Mono', monospace; font-size: 0.75rem; color: var(--text-secondary); text-align: right; }
+  td.num.good { color: var(--green); }
+  td.num.bad { color: var(--red); }
+  td.anchor { font-family: 'DM Mono', monospace; font-size: 0.75rem; text-align: right; }
+  td.anchor.pos { color: var(--green); }
+  td.anchor.zero { color: var(--text-muted); }
 
-# Custom headers to mimic a real browser - stats.nba.com blocks requests without these
-CUSTOM_HEADERS = {
-    'Host': 'stats.nba.com',
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:136.0) Gecko/20100101 Firefox/136.0',
-    'Accept': 'application/json, text/plain, */*',
-    'Accept-Language': 'en-US,en;q=0.5',
-    'Accept-Encoding': 'gzip, deflate, br',
-    'x-nba-stats-origin': 'stats',
-    'x-nba-stats-token': 'true',
-    'Origin': 'https://www.nba.com',
-    'Connection': 'keep-alive',
-    'Referer': 'https://www.nba.com/',
-    'Sec-Fetch-Dest': 'empty',
-    'Sec-Fetch-Mode': 'cors',
-    'Sec-Fetch-Site': 'same-site',
+  .score-bar { display: inline-block; height: 5px; border-radius: 3px; background: var(--accent); margin-left: 6px; vertical-align: middle; transition: width 0.3s; opacity: 0.7; }
+
+  .loading { text-align: center; padding: 4rem 2rem; color: var(--text-secondary); }
+  .loading .spinner { display: inline-block; width: 24px; height: 24px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 1rem; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .error { text-align: left; padding: 3rem 2rem; color: var(--red); max-width: 1400px; margin: 0 auto; white-space: pre-wrap; font-family: 'DM Mono', monospace; font-size: 0.72rem; line-height: 1.8; }
+
+  .methodology { display: none; }
+  .methodology details { background: var(--card); border: 1px solid var(--border-light); border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+  .methodology summary { padding: 1rem 1.25rem; cursor: pointer; font-size: 1rem; font-weight: 700; letter-spacing: -0.01em; color: var(--text-secondary); }
+  .methodology summary:hover { color: var(--text); }
+  .methodology .content { padding: 0 1.25rem 1.25rem; font-size: 0.82rem; color: var(--text-secondary); line-height: 1.7; }
+  .methodology .content h4 { color: var(--accent); font-weight: 700; margin: 1rem 0 0.4rem; font-size: 0.9rem; }
+  .methodology .content code { font-family: 'DM Mono', monospace; font-size: 0.72rem; background: var(--accent-dim); padding: 0.15em 0.4em; border-radius: 4px; }
+
+  .tooltip { display: none !important; }
+  .tooltip .tp-name { font-size: 0.95rem; font-weight: 700; color: var(--text); margin-bottom: 0.35rem; }
+  .tooltip .tp-row { display: flex; justify-content: space-between; gap: 1.5rem; }
+  .tooltip .tp-label { color: var(--text-muted); }
+  .tooltip .tp-val { font-family: 'DM Mono', monospace; color: var(--text); font-weight: 500; }
+
+  @media (max-width: 900px) {
+    .stats-bar { grid-template-columns: repeat(2,1fr); }
+    .controls { flex-direction: column; }
+    .header-brand h1 { font-size: 1.2rem; }
+  }
+  @media (max-width: 600px) {
+    .stats-bar { grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+    .table-wrap { padding: 0 0.5rem; }
+    td, th { padding: 0.4rem 0.3rem; }
+  }
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="header-inner">
+    <div class="header-brand">
+      <h1>🛡️ Defensive Rankings</h1>
+      <span class="tag">v5.2 — Real Anchor</span>
+    </div>
+    <div class="header-subtitle">Archetype-weighted composite score with team defense anchor bonus</div>
+  </div>
+</div>
+
+<div class="stats-bar" id="statsBar">
+  <div class="stat-card"><div class="label">Players Ranked</div><div class="value" id="statPlayers">—</div></div>
+  <div class="stat-card"><div class="label">#1 Defender</div><div class="value" id="statTop">—</div></div>
+  <div class="stat-card"><div class="label">Top Score</div><div class="value" id="statScore">—</div></div>
+  <div class="stat-card"><div class="label">Last Updated</div><div class="value" id="statDate">—</div></div>
+</div>
+
+<div class="controls">
+  <div class="search-box">
+    <span class="icon">🔍</span>
+    <input type="text" id="search" placeholder="Search player or team…" oninput="update()">
+  </div>
+  <div class="filter-group">
+    <label>Team</label>
+    <select id="teamFilter" onchange="update()"><option value="">All Teams</option></select>
+  </div>
+  <div class="filter-group">
+    <label>Min GP</label>
+    <select id="gpFilter" onchange="update()">
+      <option value="40">40+</option>
+      <option value="30">30+</option>
+      <option value="20">20+</option>
+      <option value="50">50+</option>
+      <option value="0">All Players</option>
+    </select>
+  </div>
+  <button id="refreshBtn" onclick="refreshData()" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:0.5rem 1.1rem;font-family:inherit;font-size:0.82rem;font-weight:600;cursor:pointer;transition:background 0.15s;">↻ Refresh</button>
+</div>
+
+<div class="table-wrap">
+  <div class="loading" id="loading"><div class="spinner"></div><br>Fetching defensive stats from Google Sheets…</div>
+  <div class="error" id="error" style="display:none"></div>
+  <table id="mainTable" style="display:none">
+    <thead>
+      <tr>
+        <th data-col="rank">#</th>
+        <th data-col="player">Player</th>
+        <th data-col="team">Team</th>
+        <th data-col="score">Score</th>
+        <th data-col="stl">STL/G</th>
+        <th data-col="blk">BLK/G</th>
+        <th data-col="defl">DEFL/G</th>
+        <th data-col="contest">CONT/G</th>
+        <th data-col="dfgpct">OPP FG%</th>
+        <th data-col="dfgdiff">DIFF%</th>
+        <th data-col="drtg">DEF RTG</th>
+        <th data-col="gp">GP</th>
+        <th data-col="mpg">MPG</th>
+        <th data-col="spm">SC/MPG</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+</div>
+
+<div class="methodology">
+  <details>
+    <summary>Methodology — How the Defensive Score Works</summary>
+    <div class="content">
+      <h4>Archetype Detection</h4>
+      Players are classified on a perimeter↔interior spectrum using a sigmoid on BLK/G. High-block bigs get interior weights; guards/wings get perimeter weights. This determines which stats matter most for each player.
+
+      <h4>Interior Formula (weights sum to 100)</h4>
+      <code>DEF FG% DIFF (22)</code> · <code>BLK/G (22)</code> · <code>DEF_RATING (14)</code> · <code>NET_RATING (10)</code> · <code>DEF FG% (10)</code> · <code>CONTESTED/G (8)</code> · <code>STL/G (5)</code> · <code>DEFL/G (5)</code> · <code>REB/G (4)</code>
+
+      <h4>Perimeter Formula (weights sum to 100)</h4>
+      <code>STL/G (22)</code> · <code>DEFL/G (16)</code> · <code>DEF FG% DIFF (12)</code> · <code>PF/G (8)</code> · <code>NET_RATING (8)</code> · <code>WIN (8)</code> · <code>CHARGES/G (6)</code> · <code>DEF FG% (6)</code> · <code>DEF_RATING (6)</code> · <code>MPG (4)</code> · <code>LOOSE BALLS/G (4)</code>
+
+      <h4>Anchor Bonus (up to +18 pts)</h4>
+      Players on top-15 defensive teams (by real team DRTG) earn a bonus scaled by: team rank tier (top-5/10/15), minutes share (25–34+ MPG), scheme factor (player DRTG vs team DRTG), and win factor (vs median).
+
+      <h4>Scoring</h4>
+      All stats are z-scored within the current season pool. The final composite uses a fixed linear transform (<code>score = raw × 0.07 + 14.5</code>) so that an average defender scores ~15, elite starters land in the mid-to-high 20s, and DPOY-caliber seasons reach the low-to-mid 30s. Because the scale is fixed (not min-max normalized), scores are comparable across seasons.
+    </div>
+  </details>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+// ═══════════════════════════════════════════════════════
+// GOOGLE SHEETS CONFIG
+// ═══════════════════════════════════════════════════════
+const STATS_ID = '1JH2FUBIyQ1zEHzZBxgP8vHBZ7d8EtP5-fSVG3zMgCgg';
+const API_KEY  = 'AIzaSyB9g7c6llswswuZQ2I5y2MwGk6BzYEtHsY';
+const BASE_URL = `https://sheets.googleapis.com/v4/spreadsheets/${STATS_ID}/values`;
+const makeURL  = tab => `${BASE_URL}/${encodeURIComponent(tab)}?key=${API_KEY}`;
+
+// Nomenclature sheet: maps NBA API names → HoopsMatic names
+const NOMEN_PUB = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vS2iZj3avZ_-CAWKu-f_pxZkf38M0quXQwMbyTXmHsN6-c9V8vU1l_sNaxg0y8dl07dqraU3_5Z3b8D/pub';
+const NOMEN_GID = '1197809522';
+const NOMEN_URL = `${NOMEN_PUB}?gid=${NOMEN_GID}&single=true&output=csv`;
+
+function parseNum(v) {
+  if (v === undefined || v === null || v === '') return null;
+  const n = parseFloat(String(v).replace(/,/g, ''));
+  return isNaN(n) ? null : n;
 }
 
-API_TIMEOUT = 60  # seconds (default is 30, which times out often)
-
-
-def api_call_with_retry(endpoint_func, max_retries=5, **kwargs):
-    """Make API call with retry logic, custom headers, and rate limiting"""
-    for attempt in range(max_retries):
-        try:
-            time.sleep(API_DELAY + random.uniform(0.5, 2.0))
-            result = endpoint_func(headers=CUSTOM_HEADERS, timeout=API_TIMEOUT, **kwargs)
-            return result
-        except Exception as e:
-            if attempt < max_retries - 1:
-                wait_time = (attempt + 1) * 10  # 10s, 20s, 30s, 40s backoff
-                print(f"  ⚠ API error, retrying in {wait_time}s... ({str(e)[:60]})")
-                time.sleep(wait_time)
-            else:
-                raise e
-    return None
-
-
-def compute_defensive_rankings(stats_data):
-    """Pre-compute defensive rankings from the 5 source tabs.
-    Mirrors the v5.1 JavaScript formula exactly."""
-    import numpy as np
-    
-    # Check required tabs exist
-    required = {
-        'trad': 'Player Traditional Totals',
-        'adv': 'Player Advanced',
-        'hustle': 'Player Hustle',
-        'defTrk': 'Def_Tracking_Overall',
-        'teamAdv': 'Team Advanced',
+function parseCSV(text) {
+  const rows = []; let current = '', inQuotes = false, row = [];
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"' && text[i+1] === '"') { current += '"'; i++; }
+      else if (ch === '"') inQuotes = false;
+      else current += ch;
+    } else {
+      if (ch === '"') inQuotes = true;
+      else if (ch === ',') { row.push(current.trim()); current = ''; }
+      else if (ch === '\n' || ch === '\r') {
+        if (ch === '\r' && text[i+1] === '\n') i++;
+        row.push(current.trim());
+        if (row.length > 1 || row[0] !== '') rows.push(row);
+        row = []; current = '';
+      } else current += ch;
     }
-    for key, name in required.items():
-        if name not in stats_data:
-            print(f"  Missing tab: {name}")
-            return None
-    
-    trad = stats_data['Player Traditional Totals'].copy()
-    adv = stats_data['Player Advanced'].copy()
-    hustle = stats_data['Player Hustle'].copy()
-    defTrk = stats_data['Def_Tracking_Overall'].copy()
-    teamAdv = stats_data['Team Advanced'].copy()
-    
-    # ── Team defense map ──
-    teamAdv['DEF_RATING'] = pd.to_numeric(teamAdv.get('DEF_RATING', teamAdv.get('DRTG', pd.Series())), errors='coerce')
-    teamAdv['TEAM_GP'] = pd.to_numeric(teamAdv.get('GP', teamAdv.get('G', pd.Series())), errors='coerce')
-    team_abbr = teamAdv.get('TEAM_ABBREVIATION', teamAdv.get('TEAM', pd.Series()))
-    teamAdv['TEAM_ABBR'] = team_abbr
-    teamAdv = teamAdv.dropna(subset=['DEF_RATING']).sort_values('DEF_RATING')
-    teamAdv['TEAM_DEF_RANK'] = range(1, len(teamAdv) + 1)
-    team_map = teamAdv.set_index('TEAM_ABBR')[['DEF_RATING', 'TEAM_DEF_RANK', 'TEAM_GP']].to_dict('index')
-    
-    # ── Build player lookup by (name, team) ──
-    def normalize(s):
-        return str(s).strip().upper() if pd.notna(s) else ''
-    
-    def build_lookup(df, name_col='PLAYER_NAME', team_col='TEAM_ABBREVIATION'):
-        lookup = {}
-        if name_col not in df.columns:
-            for c in ['PLAYER_NAME', 'Player', 'PLAYER']:
-                if c in df.columns: name_col = c; break
-        if team_col not in df.columns:
-            for c in ['TEAM_ABBREVIATION', 'TEAM', 'Team']:
-                if c in df.columns: team_col = c; break
-        for _, row in df.iterrows():
-            key = (normalize(row.get(name_col, '')), normalize(row.get(team_col, '')))
-            lookup[key] = row
-        return lookup
-    
-    adv_lookup = build_lookup(adv)
-    hustle_lookup = build_lookup(hustle)
-    defTrk_lookup = build_lookup(defTrk, name_col='CLOSE_DEF_PERSON_ID' if 'CLOSE_DEF_PERSON_ID' in defTrk.columns else 'PLAYER_NAME')
-    
-    # DefTrk may use PLAYER_LAST_TEAM_ABBREVIATION or PLAYER_NAME
-    if 'PLAYER_LAST_TEAM_ABBREVIATION' in defTrk.columns:
-        defTrk_lookup = {}
-        name_col = 'PLAYER_NAME' if 'PLAYER_NAME' in defTrk.columns else 'PLAYER_LAST_TEAM_ABBREVIATION'
-        for _, row in defTrk.iterrows():
-            pname = normalize(row.get('PLAYER_NAME', row.get('CLOSE_DEF_PERSON_ID', '')))
-            team = normalize(row.get('PLAYER_LAST_TEAM_ABBREVIATION', row.get('TEAM_ABBREVIATION', '')))
-            defTrk_lookup[(pname, team)] = row
-    
-    # ── Merge into player records ──
-    players = []
-    trad_name_col = 'PLAYER_NAME' if 'PLAYER_NAME' in trad.columns else 'Player'
-    trad_team_col = 'TEAM_ABBREVIATION' if 'TEAM_ABBREVIATION' in trad.columns else 'TEAM'
-    
-    for _, t in trad.iterrows():
-        name = str(t.get(trad_name_col, '')).strip()
-        team = str(t.get(trad_team_col, '')).strip()
-        if not name or not team: continue
-        
-        key = (normalize(name), normalize(team))
-        a = adv_lookup.get(key, {})
-        h = hustle_lookup.get(key, {})
-        d = defTrk_lookup.get(key, {})
-        tm = team_map.get(team, {})
-        
-        def gn(src, *cols):
-            """Get numeric from dict or Series"""
-            for c in cols:
-                v = src.get(c) if isinstance(src, dict) else getattr(src, c, None) if hasattr(src, c) else None
-                if v is not None and str(v).strip() not in ('', 'nan'):
-                    try: return float(v)
-                    except: pass
-            return 0.0
-        
-        gp = gn(t, 'GP', 'G')
-        mins = gn(t, 'MIN', 'MINS')
-        mpg = mins / gp if gp > 0 else 0
-        
-        p = {
-            'PLAYER': name,
-            'TEAM': team,
-            'GP': int(gp),
-            'MPG': round(mpg, 1),
-            'STL_PG': gn(t, 'STL') / gp if gp > 0 else 0,
-            'BLK_PG': gn(t, 'BLK') / gp if gp > 0 else 0,
-            'REB_PG': gn(t, 'REB', 'DREB') / gp if gp > 0 else 0,
-            'PF_PG': gn(t, 'PF') / gp if gp > 0 else 0,
-            'W': gn(t, 'W'),
-            'DEF_RATING': gn(a, 'DEF_RATING', 'DRTG'),
-            'NET_RATING': gn(a, 'NET_RATING', 'NET_RTG'),
-            'DEFLECTIONS_PG': gn(h, 'DEFLECTIONS') / gp if gp > 0 else 0,
-            'CONTESTED_SHOTS_PG': gn(h, 'CONTESTED_SHOTS', 'CONTESTED_SHOTS_2PT', 'CONTESTED_2PT') / gp if gp > 0 else 0,
-            'CHARGES_DRAWN_PG': gn(h, 'CHARGES_DRAWN') / gp if gp > 0 else 0,
-            'LOOSE_BALLS_RECOVERED_PG': gn(h, 'LOOSE_BALLS_RECOVERED') / gp if gp > 0 else 0,
-            'D_FG_PCT': gn(d, 'D_FG_PCT', 'DFG_PCT') or None,
-            'PCT_PLUSMINUS': gn(d, 'PCT_PLUSMINUS', 'PLUSMINUS') or None,
-            'TEAM_DEF_RATING': tm.get('DEF_RATING'),
-            'TEAM_DEF_RANK': tm.get('TEAM_DEF_RANK'),
-            'TEAM_GP': tm.get('TEAM_GP', 82),
+  }
+  if (current || row.length > 0) { row.push(current.trim()); if (row.length > 1 || row[0] !== '') rows.push(row); }
+  return rows;
+}
+
+// ═══════════════════════════════════════════════════════
+// DATA LOADING — single pre-computed tab
+// ═══════════════════════════════════════════════════════
+let appData = null;
+
+async function refreshData() {
+  const btn = document.getElementById('refreshBtn');
+  btn.textContent = '⏳ Loading…';
+  btn.disabled = true;
+  document.getElementById('loading').style.display = 'block';
+  document.getElementById('mainTable').style.display = 'none';
+  document.getElementById('error').style.display = 'none';
+
+  try {
+    const loadEl = document.getElementById('loading');
+    loadEl.innerHTML = `<div class="spinner"></div><br>Fetching Defensive Rankings…`;
+
+    // Single fetch: pre-computed Defensive Rankings tab
+    const res = await fetch(makeURL('Defensive_Rankings'));
+    if (!res.ok) throw new Error(`HTTP ${res.status} fetching Defensive Rankings`);
+    const data = await res.json();
+
+    if (!data.values || data.values.length < 3) throw new Error('No data in Defensive Rankings tab');
+
+    // Parse: row 0 = metadata, find header row, then data
+    let meta = '', headerIdx = -1;
+    for (let i = 0; i < Math.min(data.values.length, 5); i++) {
+      const row = data.values[i];
+      const firstCell = (row[0] || '').trim();
+      if (firstCell.toLowerCase().startsWith('season') || firstCell.includes('Updated')) {
+        meta = firstCell; continue;
+      }
+      const nonEmpty = row.filter(c => (c || '').trim() !== '').length;
+      if (nonEmpty < 3) continue;
+      headerIdx = i; break;
+    }
+    if (headerIdx < 0) throw new Error('Could not find header row');
+
+    const headers = data.values[headerIdx].map(h => (h || '').trim());
+    const colIdx = {};
+    headers.forEach((h, i) => { colIdx[h] = i; });
+
+    const metaMatch = (meta || '').match(/Last Updated:\s*(.+)/);
+    const lastUpdated = metaMatch ? metaMatch[1].trim() : 'Unknown';
+
+    // Fetch nomenclature for name mapping
+    loadEl.innerHTML = `<div class="spinner"></div><br>Applying nomenclature…`;
+    let nameMap = {};
+    try {
+      const nomenRes = await fetch(NOMEN_URL);
+      if (nomenRes.ok) {
+        const csvText = await nomenRes.text();
+        const csvRows = parseCSV(csvText);
+        for (const row of csvRows) {
+          const nbaName = (row[11] || '').trim();
+          const hhName  = (row[12] || '').trim();
+          if (nbaName && hhName && nbaName !== 'NBA NAME' && !nbaName.toLowerCase().startsWith('season')) {
+            nameMap[nbaName] = hhName;
+          }
         }
-        players.append(p)
-    
-    if not players:
-        return None
-    
-    # ── Archetype weight ──
-    for p in players:
-        p['PERIM_W'] = round(1.0 / (1.0 + np.exp(3.0 * (p['BLK_PG'] - 1.0))), 3)
-    
-    # ── Z-scores from qualified pool (GP>=20, MPG>=20) ──
-    INTERIOR_FEATURES = {
-        'PCT_PLUSMINUS': (22, -1), 'BLK_PG': (22, 1), 'DEF_RATING': (14, -1),
-        'NET_RATING': (10, 1), 'D_FG_PCT': (10, -1), 'CONTESTED_SHOTS_PG': (8, 1),
-        'STL_PG': (5, 1), 'DEFLECTIONS_PG': (5, 1), 'REB_PG': (4, 1),
+        console.log(`Nomenclature: ${Object.keys(nameMap).length} mappings`);
+      }
+    } catch (e) { console.warn('Nomenclature fetch failed (non-fatal):', e.message); }
+
+    // Build player array from pre-computed data
+    const players = [];
+    const get = (row, col) => {
+      const i = colIdx[col];
+      return i !== undefined ? (row[i] || '') : '';
+    };
+
+    for (let r = headerIdx + 1; r < data.values.length; r++) {
+      const row = data.values[r];
+      const name = get(row, 'PLAYER').trim();
+      const team = get(row, 'TEAM').trim();
+      if (!name || !team) continue;
+
+      const p = {
+        PLAYER: nameMap[name] || name,
+        PLAYER_NBA: name,
+        TEAM: team,
+        GP: parseInt(get(row, 'GP')) || 0,
+        MPG: parseFloat(get(row, 'MPG')) || 0,
+        DEF_SCORE: parseFloat(get(row, 'DEF_SCORE')) || 0,
+        DEF_SCORE_RAW: parseFloat(get(row, 'DEF_SCORE_RAW')) || 0,
+        STL_PG: parseFloat(get(row, 'STL_PG')) || 0,
+        BLK_PG: parseFloat(get(row, 'BLK_PG')) || 0,
+        DEFLECTIONS_PG: parseFloat(get(row, 'DEFLECTIONS_PG')) || 0,
+        CONTESTED_SHOTS_PG: parseFloat(get(row, 'CONTESTED_SHOTS_PG')) || 0,
+        D_FG_PCT: parseNum(get(row, 'D_FG_PCT')),
+        PCT_PLUSMINUS: parseNum(get(row, 'PCT_PLUSMINUS')),
+        DEF_RATING: parseNum(get(row, 'DEF_RATING')),
+        PERIM_W: parseFloat(get(row, 'PERIM_W')) || 0.5,
+        ANCHOR_BONUS: parseFloat(get(row, 'ANCHOR_BONUS')) || 0,
+        TEAM_DEF_RANK: parseInt(get(row, 'TEAM_DEF_RANK')) || null,
+        TEAM_DEF_RATING: parseNum(get(row, 'TEAM_DEF_RATING')),
+        GP_RATIO: parseFloat(get(row, 'GP_RATIO')) || 1,
+        EFF_MULT: parseFloat(get(row, 'EFF_MULT')) || 1,
+        SC_MPG: parseFloat(get(row, 'SC_MPG')) || 0,
+        TEAM_GP: parseInt(get(row, 'TEAM_GP')) || 82,
+      };
+      if (p.GP >= 1) players.push(p);
     }
-    PERIMETER_FEATURES = {
-        'STL_PG': (22, 1), 'DEFLECTIONS_PG': (16, 1), 'PF_PG': (8, 1),
-        'CHARGES_DRAWN_PG': (6, 1), 'PCT_PLUSMINUS': (12, -1), 'NET_RATING': (8, 1),
-        'W': (8, 1), 'D_FG_PCT': (6, -1), 'DEF_RATING': (6, -1),
-        'MPG': (4, 1), 'LOOSE_BALLS_RECOVERED_PG': (4, 1),
+
+    // Sort by DEF_SCORE descending
+    players.sort((a, b) => b.DEF_SCORE - a.DEF_SCORE);
+    players.forEach((p, i) => p.RANK = i + 1);
+
+    console.log(`Loaded ${players.length} players from pre-computed tab`);
+    if (players[0]) console.log(`#1: ${players[0].PLAYER} (${players[0].DEF_SCORE})`);
+
+    if (players.length === 0) throw new Error('No players found in Defensive Rankings tab');
+
+    appData = { players, lastUpdated, teamDefMap: {} };
+    buildStats();
+    buildTeamFilter();
+    update();
+
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('mainTable').style.display = '';
+
+  } catch (err) {
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('error').style.display = 'block';
+    document.getElementById('error').textContent = `Error: ${err.message}`;
+    console.error(err);
+  }
+  btn.textContent = '↻ Refresh';
+  btn.disabled = false;
+}
+
+function buildStats() {
+  if (!appData) return;
+  const p = appData.players;
+  document.getElementById('statPlayers').textContent = p.length;
+  document.getElementById('statTop').textContent = p[0] ? p[0].PLAYER : '—';
+  document.getElementById('statScore').innerHTML = p[0]
+    ? `${p[0].DEF_SCORE.toFixed(1)} <span class="unit">pts</span>`
+    : '—';
+  document.getElementById('statDate').innerHTML = `<span class="unit">${appData.lastUpdated}</span>`;
+}
+
+function buildTeamFilter() {
+  if (!appData) return;
+  const sel = document.getElementById('teamFilter');
+  const teams = [...new Set(appData.players.map(p => p.TEAM))].sort();
+  sel.innerHTML = '<option value="">All Teams</option>';
+  for (const t of teams) {
+    sel.innerHTML += `<option value="${t}">${t}</option>`;
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// RENDERING
+// ═══════════════════════════════════════════════════════
+let sortCol = 'rank', sortAsc = false;
+
+function update() {
+  if (!appData) return;
+  let filtered = [...appData.players];
+
+  // Filters
+  const search = document.getElementById('search').value.toLowerCase();
+  const teamF  = document.getElementById('teamFilter').value;
+  const gpF    = parseInt(document.getElementById('gpFilter').value) || 0;
+
+  if (search) filtered = filtered.filter(p => p.PLAYER.toLowerCase().includes(search) || p.TEAM.toLowerCase().includes(search));
+  if (teamF)  filtered = filtered.filter(p => p.TEAM === teamF);
+  if (gpF > 0) filtered = filtered.filter(p => p.GP >= gpF);
+
+  // Sort
+  const col = sortCol;
+  filtered.sort((a, b) => {
+    let va, vb;
+    switch (col) {
+      case 'rank':    va = a.DEF_SCORE; vb = b.DEF_SCORE; return sortAsc ? va - vb : vb - va;
+      case 'player':  va = a.PLAYER; vb = b.PLAYER; return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+      case 'team':    va = a.TEAM; vb = b.TEAM; return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+      case 'score':   va = a.DEF_SCORE; vb = b.DEF_SCORE; break;
+      case 'stl':     va = a.STL_PG; vb = b.STL_PG; break;
+      case 'blk':     va = a.BLK_PG; vb = b.BLK_PG; break;
+      case 'defl':    va = a.DEFLECTIONS_PG; vb = b.DEFLECTIONS_PG; break;
+      case 'contest': va = a.CONTESTED_SHOTS_PG; vb = b.CONTESTED_SHOTS_PG; break;
+      case 'dfgpct':  va = a.D_FG_PCT||0; vb = b.D_FG_PCT||0; break;
+      case 'dfgdiff': va = a.PCT_PLUSMINUS||0; vb = b.PCT_PLUSMINUS||0; break;
+      case 'drtg':    va = a.DEF_RATING||999; vb = b.DEF_RATING||999; break;
+      case 'gp':      va = a.GP; vb = b.GP; break;
+      case 'mpg':     va = a.MPG; vb = b.MPG; break;
+      case 'spm':     va = a.MPG>0?a.DEF_SCORE_RAW/a.MPG:0; vb = b.MPG>0?b.DEF_SCORE_RAW/b.MPG:0; break;
+      default:        va = a.RANK; vb = b.RANK;
     }
-    all_feats = set(INTERIOR_FEATURES.keys()) | set(PERIMETER_FEATURES.keys())
-    
-    qualified = [p for p in players if p['GP'] >= 20 and p['MPG'] >= 20]
-    means, stds = {}, {}
-    for f in all_feats:
-        vals = [p[f] for p in qualified if p[f] is not None and not np.isnan(p[f])]
-        means[f] = np.mean(vals) if vals else 0
-        stds[f] = np.std(vals) if vals and np.std(vals) > 0 else 1
-    
-    for p in players:
-        for f in all_feats:
-            v = p[f]
-            p[f + '_z'] = (v - means[f]) / stds[f] if v is not None and not np.isnan(v) else 0
-    
-    # ── Composite scores ──
-    for p in players:
-        int_raw = sum(w * d * p[f + '_z'] for f, (w, d) in INTERIOR_FEATURES.items())
-        per_raw = sum(w * d * p[f + '_z'] for f, (w, d) in PERIMETER_FEATURES.items())
-        p['BASE_RAW'] = p['PERIM_W'] * per_raw + (1 - p['PERIM_W']) * int_raw
-    
-    # ── Anchor bonus ──
-    wins = [p['W'] for p in players if p['W'] > 0]
-    median_wins = sorted(wins)[len(wins)//2] if wins else 0
-    
-    for p in players:
-        rank = p.get('TEAM_DEF_RANK')
-        if not rank or rank > 15:
-            p['ANCHOR_BONUS'] = 0
-            continue
-        if rank <= 5: tf = 1.0
-        elif rank <= 10: tf = 0.6
-        else: tf = 0.3
-        
-        drtg = p.get('TEAM_DEF_RATING') or 110
-        drtg_factor = max(0, (115 - drtg) / 10)
-        
-        mpg = p['MPG']
-        if mpg >= 30: mf = 1.0
-        elif mpg >= 25: mf = 0.7
-        elif mpg >= 20: mf = 0.4
-        else: mf = 0.15
-        
-        w = p['W']
-        wf = min(1.3, max(0.5, 0.5 + 0.8 * (w / median_wins))) if median_wins > 0 else 1.0
-        
-        p['ANCHOR_BONUS'] = round(tf * drtg_factor * mf * wf * 30, 1)
-    
-    # ── Final raw + organic scoring ──
-    SCORE_SCALE = 0.07
-    SCORE_BASELINE = 14.5
-    for p in players:
-        p['FINAL_RAW'] = p['BASE_RAW'] + p['ANCHOR_BONUS']
-        p['DEF_SCORE_RAW'] = round(max(0, p['FINAL_RAW'] * SCORE_SCALE + SCORE_BASELINE), 2)
-    
-    # ── GP Availability (half-strength) ──
-    for p in players:
-        team_gp = p.get('TEAM_GP') or 82
-        p['GP_RATIO'] = round(min(1.0, p['GP'] / team_gp), 3) if team_gp > 0 else 1.0
-        p['DEF_SCORE_GP'] = round(p['DEF_SCORE_RAW'] * (0.5 + 0.5 * p['GP_RATIO']), 2)
-    
-    # ── Per-Minute Efficiency (z-score multiplier on raw SC/MPG) ──
-    sc_per_min = [p['DEF_SCORE_RAW'] / p['MPG'] if p['MPG'] > 0 else 0 for p in players]
-    eff_mean = np.mean(sc_per_min)
-    eff_std = np.std(sc_per_min) if np.std(sc_per_min) > 0 else 1
-    EFF_WEIGHT = 0.08
-    
-    for i, p in enumerate(players):
-        eff_z = (sc_per_min[i] - eff_mean) / eff_std
-        p['EFF_MULT'] = round(max(0.85, min(1.20, 1.0 + EFF_WEIGHT * eff_z)), 4)
-        p['DEF_SCORE'] = round(max(0, p['DEF_SCORE_GP'] * p['EFF_MULT']), 2)
-        p['SC_MPG'] = round(sc_per_min[i], 4)
-    
-    # ── Build output DataFrame ──
-    out_cols = [
-        'PLAYER', 'TEAM', 'GP', 'MPG', 'DEF_SCORE', 'DEF_SCORE_RAW',
-        'STL_PG', 'BLK_PG', 'DEFLECTIONS_PG', 'CONTESTED_SHOTS_PG',
-        'D_FG_PCT', 'PCT_PLUSMINUS', 'DEF_RATING',
-        'PERIM_W', 'ANCHOR_BONUS', 'TEAM_DEF_RANK', 'TEAM_DEF_RATING',
-        'GP_RATIO', 'EFF_MULT', 'SC_MPG', 'TEAM_GP',
-    ]
-    
-    rows = []
-    for p in sorted(players, key=lambda x: -x['DEF_SCORE']):
-        rows.append({c: p.get(c) for c in out_cols})
-    
-    df = pd.DataFrame(rows)
-    # Round numeric columns
-    for c in ['STL_PG', 'BLK_PG', 'DEFLECTIONS_PG', 'CONTESTED_SHOTS_PG', 'MPG']:
-        if c in df.columns:
-            df[c] = df[c].round(2)
-    
-    print(f"  Top 5: {', '.join(df['PLAYER'].head(5).tolist())}")
-    print(f"  Score range: {df['DEF_SCORE'].min():.1f} - {df['DEF_SCORE'].max():.1f}")
-    
-    return df
+    return sortAsc ? va - vb : vb - va;
+  });
 
+  // Render
+  const tbody = document.getElementById('tbody');
+  tbody.innerHTML = '';
+  const maxScore = filtered.length > 0 ? Math.max(...filtered.map(p => p.DEF_SCORE)) : 35;
+  for (let idx = 0; idx < filtered.length; idx++) {
+    const p = filtered[idx];
+    const rank = idx + 1;
+    const rankClass = rank <= 5 ? 'top5' : rank <= 15 ? 'top15' : '';
+    const barW = Math.round((p.DEF_SCORE / maxScore) * 80);
+    const dfgDiff = p.PCT_PLUSMINUS !== null ? (p.PCT_PLUSMINUS * 100) : null;
 
-def upload_to_google_sheets(stats_data, credentials_file, season):
-    """Upload all dataframes to Google Sheets (separate worksheets)"""
-    try:
-        scope = ['https://spreadsheets.google.com/feeds',
-                 'https://www.googleapis.com/auth/drive']
-        
-        creds = Credentials.from_service_account_file(credentials_file, scopes=scope)
-        client = gspread.authorize(creds)
-        
-        # Season Stats Spreadsheet
-        # https://docs.google.com/spreadsheets/d/1JH2FUBIyQ1zEHzZBxgP8vHBZ7d8EtP5-fSVG3zMgCgg/edit
-        spreadsheet_id = "1JH2FUBIyQ1zEHzZBxgP8vHBZ7d8EtP5-fSVG3zMgCgg"
-        
-        spreadsheet = client.open_by_key(spreadsheet_id)
-        print(f"✓ Opened spreadsheet: {spreadsheet.title}")
-        
-        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        
-        for sheet_name, df in stats_data.items():
-            # Retry logic for rate limiting
-            max_retries = 3
-            for attempt in range(max_retries):
-                try:
-                    # Clean the dataframe - replace NaN/inf with empty string
-                    df_clean = df.fillna('')
-                    df_clean = df_clean.replace([float('inf'), float('-inf')], '')
-                    
-                    # Calculate appropriate sheet size (rows + header + buffer, actual columns needed)
-                    num_rows = min(len(df_clean) + 10, 2000)  # Cap at 2000 rows
-                    num_cols = min(len(df_clean.columns) + 5, 50)  # Cap at 50 columns
-                    
-                    try:
-                        worksheet = spreadsheet.worksheet(sheet_name)
-                        worksheet.batch_clear([f'A1:AZ2000'])
-                    except gspread.WorksheetNotFound:
-                        worksheet = spreadsheet.add_worksheet(title=sheet_name, rows=str(num_rows), cols=str(num_cols))
-                    
-                    time.sleep(2)  # Wait before writing
-                    worksheet.update([[f'Season: {season} | Last Updated: {timestamp}']], 'A1')
-                    
-                    time.sleep(2)  # Wait between updates
-                    # Convert to list and ensure all values are JSON serializable
-                    data_to_upload = []
-                    data_to_upload.append(df_clean.columns.values.tolist())
-                    for _, row in df_clean.iterrows():
-                        clean_row = []
-                        for val in row.values:
-                            if pd.isna(val) or val != val:  # Check for NaN
-                                clean_row.append('')
-                            elif isinstance(val, float) and (val == float('inf') or val == float('-inf')):
-                                clean_row.append('')
-                            else:
-                                clean_row.append(val)
-                        data_to_upload.append(clean_row)
-                    
-                    worksheet.update(data_to_upload, 'A3')
-                    
-                    time.sleep(2)  # Wait before formatting
-                    worksheet.format('A3:AZ3', {
-                        "backgroundColor": {"red": 0.2, "green": 0.2, "blue": 0.2},
-                        "textFormat": {"foregroundColor": {"red": 1, "green": 1, "blue": 1}, "bold": True}
-                    })
-                    
-                    print(f"✓ Uploaded {len(df_clean)} rows to '{sheet_name}' worksheet")
-                    time.sleep(3)  # Wait before next sheet
-                    break  # Success, exit retry loop
-                    
-                except Exception as e:
-                    if '429' in str(e) and attempt < max_retries - 1:
-                        wait_time = (attempt + 1) * 30  # 30s, 60s, 90s
-                        print(f"  ⚠ Rate limited, waiting {wait_time}s before retry...")
-                        time.sleep(wait_time)
-                    else:
-                        print(f"✗ Failed to upload '{sheet_name}': {str(e)}")
-                        break
-        
-        print(f"✓ Spreadsheet URL: {spreadsheet.url}")
-        return spreadsheet.url
-        
-    except Exception as e:
-        print(f"✗ Failed to upload to Google Sheets: {str(e)}")
-        return None
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="rank ${rankClass}">${rank}</td>
+      <td class="player">${p.PLAYER}</td>
+      <td class="team" style="cursor:pointer;text-decoration:underline;text-underline-offset:2px" onclick="document.getElementById('teamFilter').value='${p.TEAM}';update()">${p.TEAM}</td>
+      <td class="score">${p.DEF_SCORE.toFixed(1)}<span class="score-bar" style="width:${barW}px"></span></td>
+      <td class="num">${p.STL_PG.toFixed(2)}</td>
+      <td class="num">${p.BLK_PG.toFixed(2)}</td>
+      <td class="num">${p.DEFLECTIONS_PG.toFixed(1)}</td>
+      <td class="num">${p.CONTESTED_SHOTS_PG.toFixed(1)}</td>
+      <td class="num">${p.D_FG_PCT !== null ? (p.D_FG_PCT * 100).toFixed(1) + '%' : '—'}</td>
+      <td class="num ${dfgDiff !== null ? (dfgDiff < 0 ? 'good' : 'bad') : ''}">${dfgDiff !== null ? (dfgDiff >= 0 ? '+' : '') + dfgDiff.toFixed(1) + '%' : '—'}</td>
+      <td class="num">${p.DEF_RATING !== null ? p.DEF_RATING.toFixed(1) : '—'}</td>
+      <td class="num">${p.GP}</td>
+      <td class="num">${p.MPG.toFixed(1)}</td>
+      <td class="num">${p.MPG > 0 ? (p.DEF_SCORE_RAW / p.MPG).toFixed(2) : '—'}</td>
+    `;
+    // Tooltip on hover
+    tr.addEventListener('mouseenter', e => showTooltip(e, p));
+    tr.addEventListener('mousemove', e => moveTooltip(e));
+    tr.addEventListener('mouseleave', hideTooltip);
+    tbody.appendChild(tr);
+  }
 
+  // Update header sort indicators
+  document.querySelectorAll('thead th').forEach(th => {
+    th.classList.remove('sorted-asc', 'sorted-desc');
+    if (th.dataset.col === sortCol) {
+      th.classList.add(sortAsc ? 'sorted-asc' : 'sorted-desc');
+    }
+  });
+}
 
-def fetch_season_stats(season='2024-25', season_type='Regular Season'):
-    """
-    Fetch comprehensive season statistics
-    
-    Args:
-        season: NBA season (e.g., '2024-25')
-        season_type: 'Regular Season', 'Playoffs', 'All Star', etc.
-    """
-    try:
-        print(f"\n{'='*60}")
-        print(f"NBA SEASON STATS FETCHER - {season} {season_type}")
-        print(f"{'='*60}")
-        print(f"Started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        
-        stats_data = {}
-        stats_counts = {}
-        
-        # ============================================================
-        # SECTION 1: PLAYER TRADITIONAL & ADVANCED STATS
-        # ============================================================
-        print(f"\n{'─'*40}")
-        print("SECTION 1: PLAYER STATS")
-        print(f"{'─'*40}")
-        
-        # 1.1 Traditional Stats (Totals)
-        print("\n📊 Fetching Traditional Stats (Totals)...")
-        traditional_totals = api_call_with_retry(
-            LeagueDashPlayerStats,
-            per_mode_detailed='Totals',
-            season=season,
-            season_type_all_star=season_type,
-            measure_type_detailed_defense='Base'
-        )
-        df = traditional_totals.get_data_frames()[0]
-        stats_data['Player Traditional Totals'] = df
-        stats_counts['Player Traditional Totals'] = len(df)
-        print(f"✓ Traditional Totals: {len(df)} players")
-        
-        # 1.2 Traditional Stats (Per Game)
-        print("\n📊 Fetching Traditional Stats (Per Game)...")
-        traditional_pg = api_call_with_retry(
-            LeagueDashPlayerStats,
-            per_mode_detailed='PerGame',
-            season=season,
-            season_type_all_star=season_type,
-            measure_type_detailed_defense='Base'
-        )
-        df = traditional_pg.get_data_frames()[0]
-        stats_data['Player Traditional PerGame'] = df
-        stats_counts['Player Traditional PerGame'] = len(df)
-        print(f"✓ Traditional Per Game: {len(df)} players")
-        
-        # 1.3 Traditional Stats (Per 36)
-        print("\n📊 Fetching Traditional Stats (Per 36)...")
-        traditional_p36 = api_call_with_retry(
-            LeagueDashPlayerStats,
-            per_mode_detailed='Per36',
-            season=season,
-            season_type_all_star=season_type,
-            measure_type_detailed_defense='Base'
-        )
-        df = traditional_p36.get_data_frames()[0]
-        stats_data['Player Traditional Per36'] = df
-        stats_counts['Player Traditional Per36'] = len(df)
-        print(f"✓ Traditional Per 36: {len(df)} players")
-        
-        # 1.4 Advanced Stats
-        print("\n📊 Fetching Advanced Stats...")
-        advanced = api_call_with_retry(
-            LeagueDashPlayerStats,
-            per_mode_detailed='Totals',
-            season=season,
-            season_type_all_star=season_type,
-            measure_type_detailed_defense='Advanced'
-        )
-        df = advanced.get_data_frames()[0]
-        stats_data['Player Advanced'] = df
-        stats_counts['Player Advanced'] = len(df)
-        print(f"✓ Advanced Stats: {len(df)} players")
-        
-        # 1.5 Misc Stats (Points Created, etc.)
-        print("\n📊 Fetching Misc Stats...")
-        misc = api_call_with_retry(
-            LeagueDashPlayerStats,
-            per_mode_detailed='Totals',
-            season=season,
-            season_type_all_star=season_type,
-            measure_type_detailed_defense='Misc'
-        )
-        df = misc.get_data_frames()[0]
-        stats_data['Player Misc'] = df
-        stats_counts['Player Misc'] = len(df)
-        print(f"✓ Misc Stats: {len(df)} players")
-        
-        # 1.6 Scoring Stats (Points breakdown)
-        print("\n📊 Fetching Scoring Stats...")
-        scoring = api_call_with_retry(
-            LeagueDashPlayerStats,
-            per_mode_detailed='Totals',
-            season=season,
-            season_type_all_star=season_type,
-            measure_type_detailed_defense='Scoring'
-        )
-        df = scoring.get_data_frames()[0]
-        stats_data['Player Scoring'] = df
-        stats_counts['Player Scoring'] = len(df)
-        print(f"✓ Scoring Stats: {len(df)} players")
-        
-        # 1.7 Usage Stats
-        print("\n📊 Fetching Usage Stats...")
-        usage = api_call_with_retry(
-            LeagueDashPlayerStats,
-            per_mode_detailed='Totals',
-            season=season,
-            season_type_all_star=season_type,
-            measure_type_detailed_defense='Usage'
-        )
-        df = usage.get_data_frames()[0]
-        stats_data['Player Usage'] = df
-        stats_counts['Player Usage'] = len(df)
-        print(f"✓ Usage Stats: {len(df)} players")
-        
-        # Note: 'Opponent' and 'Defense' measure types don't work for LeagueDashPlayerStats
-        # Team opponent stats are fetched in the Team Stats section instead
-        
-        # ============================================================
-        # SECTION 2: CLUTCH STATS
-        # ============================================================
-        print(f"\n{'─'*40}")
-        print("SECTION 2: CLUTCH STATS")
-        print(f"{'─'*40}")
-        
-        print("\n📊 Fetching Clutch Stats...")
-        clutch = api_call_with_retry(
-            LeagueDashPlayerClutch,
-            per_mode_detailed='Totals',
-            season=season,
-            season_type_all_star=season_type
-        )
-        df = clutch.get_data_frames()[0]
-        stats_data['Player Clutch'] = df
-        stats_counts['Player Clutch'] = len(df)
-        print(f"✓ Clutch Stats: {len(df)} players")
-        
-        # ============================================================
-        # SECTION 3: BIO STATS
-        # ============================================================
-        print(f"\n{'─'*40}")
-        print("SECTION 3: BIO STATS")
-        print(f"{'─'*40}")
-        
-        print("\n📊 Fetching Bio Stats...")
-        bio = api_call_with_retry(
-            LeagueDashPlayerBioStats,
-            per_mode_simple='Totals',
-            season=season,
-            season_type_all_star=season_type
-        )
-        df = bio.get_data_frames()[0]
-        stats_data['Player Bio'] = df
-        stats_counts['Player Bio'] = len(df)
-        print(f"✓ Bio Stats: {len(df)} players")
-        
-        # ============================================================
-        # SECTION 4: HUSTLE STATS
-        # ============================================================
-        print(f"\n{'─'*40}")
-        print("SECTION 4: HUSTLE STATS")
-        print(f"{'─'*40}")
-        
-        print("\n📊 Fetching Hustle Stats...")
-        hustle = api_call_with_retry(
-            LeagueHustleStatsPlayer,
-            per_mode_time='Totals',
-            season=season,
-            season_type_all_star=season_type
-        )
-        df = hustle.get_data_frames()[0]
-        stats_data['Player Hustle'] = df
-        stats_counts['Player Hustle'] = len(df)
-        print(f"✓ Hustle Stats: {len(df)} players")
-        
-        # ============================================================
-        # SECTION 5: DEFENSIVE IMPACT (TRACKING)
-        # ============================================================
-        print(f"\n{'─'*40}")
-        print("SECTION 5: DEFENSIVE TRACKING")
-        print(f"{'─'*40}")
-        
-        defense_categories = ['Overall', '3 Pointers', '2 Pointers', 'Less Than 6Ft', 
-                            'Less Than 10Ft', 'Greater Than 15Ft']
-        
-        for category in defense_categories:
-            print(f"\n📊 Fetching Defensive Impact - {category}...")
-            try:
-                def_impact = api_call_with_retry(
-                    LeagueDashPtDefend,
-                    per_mode_simple='Totals',
-                    season=season,
-                    season_type_all_star=season_type,
-                    defense_category=category
-                )
-                df = def_impact.get_data_frames()[0]
-                sheet_name = f'Def Tracking {category}'.replace(' ', '_')[:31]
-                stats_data[sheet_name] = df
-                stats_counts[sheet_name] = len(df)
-                print(f"✓ Defensive Impact {category}: {len(df)} players")
-            except Exception as e:
-                print(f"⚠ Could not fetch {category}: {str(e)[:50]}")
-        
-        # ============================================================
-        # SECTION 6: SHOOTING STATS (TRACKING)
-        # ============================================================
-        print(f"\n{'─'*40}")
-        print("SECTION 6: SHOOTING TRACKING")
-        print(f"{'─'*40}")
-        
-        print("\n📊 Fetching Shot Tracking Stats...")
-        try:
-            shot_tracking = api_call_with_retry(
-                LeagueDashPlayerPtShot,
-                per_mode_simple='Totals',
-                season=season,
-                season_type_all_star=season_type
-            )
-            df = shot_tracking.get_data_frames()[0]
-            stats_data['Shot Tracking'] = df
-            stats_counts['Shot Tracking'] = len(df)
-            print(f"✓ Shot Tracking: {len(df)} players")
-        except Exception as e:
-            print(f"⚠ Could not fetch Shot Tracking: {str(e)[:50]}")
-        
-        print("\n📊 Fetching Shot Location Stats...")
-        try:
-            shot_locations = api_call_with_retry(
-                LeagueDashPlayerShotLocations,
-                per_mode_detailed='Totals',
-                season=season,
-                season_type_all_star=season_type
-            )
-            df = shot_locations.get_data_frames()[0]
-            # Shot Locations has multi-level columns - flatten them
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = ['_'.join(str(c) for c in col).strip('_') for col in df.columns.values]
-            stats_data['Shot Locations'] = df
-            stats_counts['Shot Locations'] = len(df)
-            print(f"✓ Shot Locations: {len(df)} players")
-        except Exception as e:
-            print(f"⚠ Could not fetch Shot Locations: {str(e)[:50]}")
-        
-        # ============================================================
-        # SECTION 7: ESTIMATED ADVANCED METRICS
-        # ============================================================
-        print(f"\n{'─'*40}")
-        print("SECTION 7: ESTIMATED METRICS")
-        print(f"{'─'*40}")
-        
-        print("\n📊 Fetching Estimated Advanced Metrics...")
-        try:
-            estimated = api_call_with_retry(
-                PlayerEstimatedMetrics,
-                season=season,
-                season_type=season_type
-            )
-            df = estimated.get_data_frames()[0]
-            stats_data['Estimated Metrics'] = df
-            stats_counts['Estimated Metrics'] = len(df)
-            print(f"✓ Estimated Metrics: {len(df)} players")
-        except Exception as e:
-            print(f"⚠ Could not fetch Estimated Metrics: {str(e)[:50]}")
-        
-        # ============================================================
-        # SECTION 8: LEAGUE LEADERS
-        # ============================================================
-        print(f"\n{'─'*40}")
-        print("SECTION 8: LEAGUE LEADERS")
-        print(f"{'─'*40}")
-        
-        leader_categories = ['PTS', 'REB', 'AST', 'STL', 'BLK', 'EFF', 'FG_PCT', 
-                           'FG3_PCT', 'FT_PCT', 'AST_TOV', 'STL_TOV']
-        
-        all_leaders = []
-        for category in leader_categories:
-            print(f"\n📊 Fetching Leaders - {category}...")
-            try:
-                leaders = api_call_with_retry(
-                    LeagueLeaders,
-                    season=season,
-                    season_type_all_star=season_type,
-                    stat_category_abbreviation=category,
-                    per_mode48='Totals'
-                )
-                df = leaders.get_data_frames()[0]
-                df['CATEGORY'] = category
-                all_leaders.append(df)
-                print(f"✓ {category} Leaders: {len(df)} players")
-            except Exception as e:
-                print(f"⚠ Could not fetch {category} leaders: {str(e)[:50]}")
-        
-        if all_leaders:
-            combined_leaders = pd.concat(all_leaders, ignore_index=True)
-            stats_data['League Leaders'] = combined_leaders
-            stats_counts['League Leaders'] = len(combined_leaders)
-        
-        # ============================================================
-        # SECTION 9: TEAM STATS
-        # ============================================================
-        print(f"\n{'─'*40}")
-        print("SECTION 9: TEAM STATS")
-        print(f"{'─'*40}")
-        
-        # 9.1 Team Traditional
-        print("\n📊 Fetching Team Traditional Stats...")
-        team_trad = api_call_with_retry(
-            LeagueDashTeamStats,
-            per_mode_detailed='Totals',
-            season=season,
-            season_type_all_star=season_type,
-            measure_type_detailed_defense='Base'
-        )
-        df = team_trad.get_data_frames()[0]
-        stats_data['Team Traditional'] = df
-        stats_counts['Team Traditional'] = len(df)
-        print(f"✓ Team Traditional: {len(df)} teams")
-        
-        # 9.2 Team Advanced
-        print("\n📊 Fetching Team Advanced Stats...")
-        team_adv = api_call_with_retry(
-            LeagueDashTeamStats,
-            per_mode_detailed='Totals',
-            season=season,
-            season_type_all_star=season_type,
-            measure_type_detailed_defense='Advanced'
-        )
-        df = team_adv.get_data_frames()[0]
-        stats_data['Team Advanced'] = df
-        stats_counts['Team Advanced'] = len(df)
-        print(f"✓ Team Advanced: {len(df)} teams")
-        
-        # 9.3 Team Four Factors
-        print("\n📊 Fetching Team Four Factors...")
-        team_four = api_call_with_retry(
-            LeagueDashTeamStats,
-            per_mode_detailed='Totals',
-            season=season,
-            season_type_all_star=season_type,
-            measure_type_detailed_defense='Four Factors'
-        )
-        df = team_four.get_data_frames()[0]
-        stats_data['Team Four Factors'] = df
-        stats_counts['Team Four Factors'] = len(df)
-        print(f"✓ Team Four Factors: {len(df)} teams")
-        
-        # 9.4 Team Opponent
-        print("\n📊 Fetching Team Opponent Stats...")
-        team_opp = api_call_with_retry(
-            LeagueDashTeamStats,
-            per_mode_detailed='Totals',
-            season=season,
-            season_type_all_star=season_type,
-            measure_type_detailed_defense='Opponent'
-        )
-        df = team_opp.get_data_frames()[0]
-        stats_data['Team Opponent'] = df
-        stats_counts['Team Opponent'] = len(df)
-        print(f"✓ Team Opponent: {len(df)} teams")
-        
-        # 9.5 Team Clutch
-        print("\n📊 Fetching Team Clutch Stats...")
-        team_clutch = api_call_with_retry(
-            LeagueDashTeamClutch,
-            per_mode_detailed='Totals',
-            season=season,
-            season_type_all_star=season_type
-        )
-        df = team_clutch.get_data_frames()[0]
-        stats_data['Team Clutch'] = df
-        stats_counts['Team Clutch'] = len(df)
-        print(f"✓ Team Clutch: {len(df)} teams")
-        
-        # 9.6 Team Hustle
-        print("\n📊 Fetching Team Hustle Stats...")
-        team_hustle = api_call_with_retry(
-            LeagueHustleStatsTeam,
-            per_mode_time='Totals',
-            season=season,
-            season_type_all_star=season_type
-        )
-        df = team_hustle.get_data_frames()[0]
-        stats_data['Team Hustle'] = df
-        stats_counts['Team Hustle'] = len(df)
-        print(f"✓ Team Hustle: {len(df)} teams")
-        
-        # 9.7 Team Estimated Metrics
-        print("\n📊 Fetching Team Estimated Metrics...")
-        try:
-            team_est = api_call_with_retry(
-                TeamEstimatedMetrics,
-                season=season,
-                season_type=season_type
-            )
-            df = team_est.get_data_frames()[0]
-            stats_data['Team Estimated Metrics'] = df
-            stats_counts['Team Estimated Metrics'] = len(df)
-            print(f"✓ Team Estimated Metrics: {len(df)} teams")
-        except Exception as e:
-            print(f"⚠ Could not fetch Team Estimated Metrics: {str(e)[:50]}")
-        
-        # ============================================================
-        # SECTION 10: STANDINGS
-        # ============================================================
-        print(f"\n{'─'*40}")
-        print("SECTION 10: STANDINGS")
-        print(f"{'─'*40}")
-        
-        print("\n📊 Fetching League Standings...")
-        try:
-            standings = api_call_with_retry(
-                LeagueStandingsV3,
-                season=season,
-                season_type=season_type
-            )
-            df = standings.get_data_frames()[0]
-            stats_data['Standings'] = df
-            stats_counts['Standings'] = len(df)
-            print(f"✓ Standings: {len(df)} teams")
-        except Exception as e:
-            print(f"⚠ Could not fetch Standings: {str(e)[:50]}")
-        
-        # ============================================================
-        # SECTION 11: LINEUPS
-        # ============================================================
-        print(f"\n{'─'*40}")
-        print("SECTION 11: LINEUP STATS")
-        print(f"{'─'*40}")
-        
-        print("\n📊 Fetching 5-Man Lineup Stats...")
-        try:
-            lineups = api_call_with_retry(
-                LeagueDashLineups,
-                season=season,
-                season_type_all_star=season_type,
-                group_quantity=5
-            )
-            df = lineups.get_data_frames()[0]
-            stats_data['Lineups 5-Man'] = df
-            stats_counts['Lineups 5-Man'] = len(df)
-            print(f"✓ 5-Man Lineups: {len(df)} lineups")
-        except Exception as e:
-            print(f"⚠ Could not fetch Lineups: {str(e)[:50]}")
-        
-        # ============================================================
-        # SECTION 12: PLAY TYPES (SYNERGY)
-        # ============================================================
-        print(f"\n{'─'*40}")
-        print("SECTION 12: PLAY TYPE STATS (SYNERGY)")
-        print(f"{'─'*40}")
-        
-        play_types = ['Isolation', 'Transition', 'PRBallHandler', 'PRRollman',
-                     'Postup', 'Spotup', 'Handoff', 'Cut', 'OffScreen', 
-                     'OffRebound', 'Misc']
-        
-        all_play_types = []
-        for play_type in play_types:
-            print(f"\n📊 Fetching Play Type - {play_type}...")
-            try:
-                synergy = api_call_with_retry(
-                    SynergyPlayTypes,
-                    per_mode_simple='Totals',
-                    season=season,
-                    season_type_all_star=season_type,
-                    play_type_nullable=play_type,
-                    type_grouping_nullable='offensive'
-                )
-                df = synergy.get_data_frames()[0]
-                df['PLAY_TYPE'] = play_type
-                all_play_types.append(df)
-                print(f"✓ {play_type}: {len(df)} players")
-            except Exception as e:
-                print(f"⚠ Could not fetch {play_type}: {str(e)[:50]}")
-        
-        if all_play_types:
-            combined_play_types = pd.concat(all_play_types, ignore_index=True)
-            stats_data['Play Types Offense'] = combined_play_types
-            stats_counts['Play Types Offense'] = len(combined_play_types)
-        
-        # ============================================================
-        # SECTION 13: ALL-TIME LEADERS
-        # ============================================================
-        print(f"\n{'─'*40}")
-        print("SECTION 13: ALL-TIME LEADERS")
-        print(f"{'─'*40}")
-        
-        print("\n📊 Fetching All-Time Leaders...")
-        try:
-            alltime = api_call_with_retry(
-                AllTimeLeadersGrids,
-                league_id='00',
-                per_mode_simple='Totals',
-                season_type='Regular Season',
-                topx=500
-            )
-            
-            # Get all available leader categories
-            frames = alltime.get_data_frames()
-            category_names = ['PTS', 'REB', 'AST', 'STL', 'BLK', 'FG3M', 
-                            'FGM', 'FTM', 'GP', 'MIN']
-            
-            all_alltime = []
-            for i, df in enumerate(frames[:len(category_names)]):
-                if len(df) > 0:
-                    cat_name = category_names[i] if i < len(category_names) else f'Category_{i}'
-                    df['CATEGORY'] = cat_name
-                    all_alltime.append(df)
-            
-            if all_alltime:
-                combined_alltime = pd.concat(all_alltime, ignore_index=True)
-                stats_data['All-Time Leaders'] = combined_alltime
-                stats_counts['All-Time Leaders'] = len(combined_alltime)
-                print(f"✓ All-Time Leaders: {len(combined_alltime)} total rows")
-        except Exception as e:
-            print(f"⚠ Could not fetch All-Time Leaders: {str(e)[:50]}")
-        
-        # ============================================================
-        # SECTION 14: COMPUTE DEFENSIVE RANKINGS
-        # ============================================================
-        print(f"\n{'─'*40}")
-        print("SECTION 14: DEFENSIVE RANKINGS (PRE-COMPUTED)")
-        print(f"{'─'*40}")
-        
-        try:
-            def_rankings = compute_defensive_rankings(stats_data)
-            if def_rankings is not None and len(def_rankings) > 0:
-                stats_data['Defensive_Rankings'] = def_rankings
-                print(f"✓ Defensive Rankings: {len(def_rankings)} players")
-            else:
-                print("⚠ Defensive Rankings: no data produced")
-        except Exception as e:
-            print(f"⚠ Could not compute Defensive Rankings: {str(e)}")
-            import traceback; traceback.print_exc()
-        
-        # ============================================================
-        # SAVE & UPLOAD
-        # ============================================================
-        print(f"\n{'='*60}")
-        print("SAVING DATA")
-        print(f"{'='*60}")
-        
-        # Create output directory
-        output_dir = os.path.join(os.path.dirname(__file__), 'output_season')
-        os.makedirs(output_dir, exist_ok=True)
-        
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        
-        # Save all stats to CSV files
-        print("\nSaving CSV files...")
-        for stat_name, df in stats_data.items():
-            safe_name = stat_name.replace(' ', '_').replace('/', '_').lower()[:50]
-            filename = os.path.join(output_dir, f'{safe_name}_{season.replace("-", "_")}_{timestamp}.csv')
-            df.to_csv(filename, index=False)
-            
-            # Also save as "latest"
-            latest_filename = os.path.join(output_dir, f'{safe_name}_{season.replace("-", "_")}_latest.csv')
-            df.to_csv(latest_filename, index=False)
-            
-            print(f"✓ Saved {stat_name}")
-        
-        # Upload to Google Sheets
-        credentials_file = os.path.join(os.path.dirname(__file__), 'google_credentials.json')
-        sheets_url = ""
-        
-        if os.path.exists(credentials_file):
-            print("\nUploading to Google Sheets...")
-            sheets_url = upload_to_google_sheets(stats_data, credentials_file, season)
-        else:
-            print("\n⚠ Google credentials file not found. Skipping Google Sheets upload.")
-            print(f"  Expected location: {credentials_file}")
-        
-        print(f"\n{'='*60}")
-        print(f"✓ All season stats for {season} successfully fetched!")
-        print(f"  Total categories: {len(stats_data)}")
-        print(f"  Completed at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"{'='*60}")
-        
-        return stats_data, stats_counts
-        
-    except Exception as e:
-        print(f"\n✗ Error occurred: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        
-        # Log error
-        error_log = os.path.join(os.path.dirname(__file__), 'error_log_season.txt')
-        with open(error_log, 'a') as f:
-            f.write(f"{datetime.now()}: {str(e)}\n")
-        
-        return None, None
+// Column sort
+document.querySelectorAll('thead th').forEach(th => {
+  th.addEventListener('click', () => {
+    const col = th.dataset.col;
+    if (sortCol === col) {
+      sortAsc = !sortAsc;
+    } else {
+      sortCol = col;
+      // Default sort directions
+      sortAsc = ['player', 'team', 'dfgpct', 'dfgdiff', 'drtg'].includes(col);
+    }
+    update();
+  });
+});
 
+// ═══════════════════════════════════════════════════════
+// TOOLTIP
+// ═══════════════════════════════════════════════════════
+function showTooltip(e, p) {
+  const tt = document.getElementById('tooltip');
+  const archLabel = p.PERIM_W > 0.6 ? 'Perimeter' : p.PERIM_W <= 0.4 ? 'Interior' : 'Mixed';
+  const teamRank = p.TEAM_DEF_RANK ? `#${p.TEAM_DEF_RANK}` : '—';
+  const teamDrtg = p.TEAM_DEF_RATING ? p.TEAM_DEF_RATING.toFixed(1) : '—';
+  tt.innerHTML = `
+    <div class="tp-name">${p.PLAYER} · ${p.TEAM}</div>
+    <div class="tp-row"><span class="tp-label">Archetype</span><span class="tp-val">${archLabel} (${(p.PERIM_W * 100).toFixed(0)}% perim)</span></div>
+    <div class="tp-row"><span class="tp-label">Def Score</span><span class="tp-val">${p.DEF_SCORE.toFixed(1)}</span></div>
+    <div class="tp-row"><span class="tp-label">Base Raw</span><span class="tp-val">${p.DEF_SCORE_RAW.toFixed(1)}</span></div>
+    <div class="tp-row"><span class="tp-label">GP Avail.</span><span class="tp-val">${p.GP}/${p.TEAM_GP} (${(p.GP_RATIO * 100).toFixed(0)}%) → ×${(0.5 + 0.5 * p.GP_RATIO).toFixed(3)}</span></div>
+    <div class="tp-row"><span class="tp-label">Efficiency</span><span class="tp-val">${p.EFF_Z >= 0 ? '+' : ''}${p.EFF_Z.toFixed(2)}σ → ×${p.EFF_MULT.toFixed(3)}</span></div>
+    <div class="tp-row"><span class="tp-label">Anchor Bonus</span><span class="tp-val">${p.ANCHOR_BONUS > 0.1 ? '+' + p.ANCHOR_BONUS.toFixed(1) : 'None'}</span></div>
+    <div class="tp-row"><span class="tp-label">Team Defense</span><span class="tp-val">${teamRank} (${teamDrtg} DRTG)</span></div>
+  `;
+  tt.style.display = 'block';
+  moveTooltip(e);
+}
 
-if __name__ == "__main__":
-    import argparse
-    
-    parser = argparse.ArgumentParser(description='Fetch NBA Season Stats')
-    parser.add_argument('--season', type=str, default='2025-26', 
-                       help='NBA season (e.g., 2025-26)')
-    parser.add_argument('--type', type=str, default='Regular Season',
-                       help='Season type: Regular Season, Playoffs, etc.')
-    
-    args = parser.parse_args()
-    
-    fetch_season_stats(season=args.season, season_type=args.type)
+function moveTooltip(e) {
+  const tt = document.getElementById('tooltip');
+  const x = Math.min(e.clientX + 14, window.innerWidth - 340);
+  const y = Math.min(e.clientY + 14, window.innerHeight - 220);
+  tt.style.left = x + 'px';
+  tt.style.top = y + 'px';
+}
+
+function hideTooltip() {
+  document.getElementById('tooltip').style.display = 'none';
+}
+
+// ═══════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════
+refreshData();
+</script>
+</body>
+</html>
