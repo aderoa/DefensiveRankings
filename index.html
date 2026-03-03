@@ -118,7 +118,7 @@
   <div class="header-inner">
     <div class="header-brand">
       <h1>🛡️ Defensive Rankings</h1>
-      <span class="tag">v3.1 — Real Anchor</span>
+      <span class="tag">v3.2 — Real Anchor</span>
     </div>
     <div class="header-subtitle">Archetype-weighted composite score with team defense anchor bonus</div>
   </div>
@@ -259,26 +259,42 @@ function parseNum(v) {
 }
 
 function parseSheet(data) {
-  // The sheet can have two layouts:
-  // A) Row 0 = metadata ("Season: 2025-26 | Last Updated: ..."), Row 1 = headers, Row 2+ = data
-  // B) Row 0 = headers directly, Row 1+ = data
+  // Sheet layout from nba_season_stats.py:
+  //   A1 (index 0): "Season: 2025-26 | Last Updated: ..."
+  //   A2 (index 1): BLANK ROW
+  //   A3 (index 2): Column headers
+  //   A4+ (index 3+): Data rows
+  // But blank rows may or may not be returned by the API,
+  // so we scan for the header row dynamically.
   if (!data.values || data.values.length < 2) return { headers: [], rows: [], meta: '' };
   
-  const row0 = data.values[0].map(h => (h || '').trim());
-  const row0IsMetadata = row0[0] && (row0[0].toLowerCase().startsWith('season') || row0[0].includes('Updated'));
+  let meta = '';
+  let headerIdx = -1;
   
-  let meta, headers, dataStart;
-  if (row0IsMetadata) {
-    meta = data.values[0][0] || '';
-    headers = data.values.length > 1 ? data.values[1].map(h => (h || '').trim()) : [];
-    dataStart = 2;
-  } else {
-    meta = '';
-    headers = row0;
-    dataStart = 1;
+  // Find the header row: first row with 3+ non-empty cells that isn't metadata
+  for (let i = 0; i < Math.min(data.values.length, 5); i++) {
+    const row = data.values[i];
+    const firstCell = (row[0] || '').trim();
+    
+    // Metadata row
+    if (firstCell.toLowerCase().startsWith('season') || firstCell.includes('Updated')) {
+      meta = firstCell;
+      continue;
+    }
+    
+    // Skip empty/near-empty rows
+    const nonEmpty = row.filter(c => (c || '').trim() !== '').length;
+    if (nonEmpty < 3) continue;
+    
+    // This looks like headers
+    headerIdx = i;
+    break;
   }
   
-  const rows = data.values.slice(dataStart).map(r => mapRow(headers, r));
+  if (headerIdx < 0) return { headers: [], rows: [], meta };
+  
+  const headers = data.values[headerIdx].map(h => (h || '').trim());
+  const rows = data.values.slice(headerIdx + 1).map(r => mapRow(headers, r));
   return { headers, rows, meta };
 }
 
