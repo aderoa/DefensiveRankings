@@ -118,7 +118,7 @@
   <div class="header-inner">
     <div class="header-brand">
       <h1>🛡️ Defensive Rankings</h1>
-      <span class="tag">v3.7 — Real Anchor</span>
+      <span class="tag">v3.8 — Real Anchor</span>
     </div>
     <div class="header-subtitle">Archetype-weighted composite score with team defense anchor bonus</div>
   </div>
@@ -194,8 +194,8 @@
       <h4>Anchor Bonus (up to +18 pts)</h4>
       Players on top-15 defensive teams (by real team DRTG) earn a bonus scaled by: team rank tier (top-5/10/15), minutes share (25–34+ MPG), scheme factor (player DRTG vs team DRTG), and win factor (vs median).
 
-      <h4>Normalization</h4>
-      All stats are z-scored within the current season pool. The final composite is 0–100 normalized where 100 = best defender in the league.
+      <h4>Scoring</h4>
+      All stats are z-scored within the current season pool. The final composite uses a fixed linear transform (<code>score = raw × 0.12 + 15</code>) so that an average defender scores ~15, elite starters land in the mid-to-high 20s, and DPOY-caliber seasons reach the low-to-mid 30s. Because the scale is fixed (not min-max normalized), scores are comparable across seasons.
     </div>
   </details>
 </div>
@@ -218,6 +218,12 @@ const TABS = {
   defTrk:  'Def_Tracking_Overall',
   teamAdv: 'Team Advanced',
 };
+
+// Nomenclature sheet: maps NBA API names → HoopsMatic names
+// Lives in Daily Stats spreadsheet (different from Season Stats)
+const NOMEN_PUB = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vS2iZj3avZ_-CAWKu-f_pxZkf38M0quXQwMbyTXmHsN6-c9V8vU1l_sNaxg0y8dl07dqraU3_5Z3b8D/pub';
+const NOMEN_GID = '1197809522'; // col L=NBA NAME, col M=HH NAME
+const NOMEN_URL = `${NOMEN_PUB}?gid=${NOMEN_GID}&single=true&output=csv`;
 
 // ═══════════════════════════════════════════════════════
 // COLUMN NAME MAPPING: NBA API → Formula
@@ -245,6 +251,29 @@ function parseNum(v) {
   if (v === undefined || v === null || v === '') return null;
   const n = parseFloat(String(v).replace(/,/g, ''));
   return isNaN(n) ? null : n;
+}
+
+function parseCSV(text) {
+  const rows = []; let current = '', inQuotes = false, row = [];
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"' && text[i+1] === '"') { current += '"'; i++; }
+      else if (ch === '"') inQuotes = false;
+      else current += ch;
+    } else {
+      if (ch === '"') inQuotes = true;
+      else if (ch === ',') { row.push(current.trim()); current = ''; }
+      else if (ch === '\n' || ch === '\r') {
+        if (ch === '\r' && text[i+1] === '\n') i++;
+        row.push(current.trim());
+        if (row.length > 1 || row[0] !== '') rows.push(row);
+        row = []; current = '';
+      } else current += ch;
+    }
+  }
+  if (current || row.length > 0) { row.push(current.trim()); if (row.length > 1 || row[0] !== '') rows.push(row); }
+  return rows;
 }
 
 function parseSheet(data) {
@@ -375,15 +404,14 @@ function computeDefensiveScores(players) {
     p.FINAL_RAW = p.BASE_RAW + p.ANCHOR_BONUS;
   }
 
-  // Normalize to RAT-like scale: 0 to ~35
-  // Elite defenders land in late 20s/early 30s, ~35 = historically great
-  const rawVals = players.map(p => p.FINAL_RAW);
-  const rawMin = Math.min(...rawVals);
-  const rawMax = Math.max(...rawVals);
-  const range = rawMax - rawMin || 1;
-  const SCORE_CEILING = 35;
+  // Organic scoring: fixed linear transform on raw composite
+  // Z-score composites have stable distributions across seasons,
+  // so a fixed scale produces naturally varying top scores (~30-37)
+  // that allow meaningful cross-season comparison.
+  const SCORE_SCALE = 0.12;    // Controls spread
+  const SCORE_BASELINE = 15;   // Average defender ≈ 15
   for (const p of players) {
-    p.DEF_SCORE = SCORE_CEILING * (p.FINAL_RAW - rawMin) / range;
+    p.DEF_SCORE = Math.max(0, p.FINAL_RAW * SCORE_SCALE + SCORE_BASELINE);
   }
 
   // Rank
@@ -471,6 +499,34 @@ async function refreshData() {
 
     const [tradRes, advRes, hustleRes, defTrkRes, teamAdvRes] =
       [tabResults.trad, tabResults.adv, tabResults.hustle, tabResults.defTrk, tabResults.teamAdv];
+
+    // Fetch nomenclature (NBA NAME → HH NAME) from Daily Stats spreadsheet
+    loadEl.innerHTML = `<div class="spinner"></div><br>Fetching nomenclature…`;
+    let nameMap = {}; // NBA NAME → HH NAME
+    try {
+      const nomenRes = await fetch(NOMEN_URL);
+      if (nomenRes.ok) {
+        const csvText = await nomenRes.text();
+        const csvRows = parseCSV(csvText);
+        // Col L (index 11) = NBA NAME, Col M (index 12) = HH NAME
+        // Skip rows that look like headers/metadata
+        for (const row of csvRows) {
+          const nbaName = (row[11] || '').trim();
+          const hhName  = (row[12] || '').trim();
+          if (nbaName && hhName && nbaName !== 'NBA NAME' && !nbaName.toLowerCase().startsWith('season')) {
+            nameMap[nbaName] = hhName;
+          }
+        }
+        console.log(`Nomenclature loaded: ${Object.keys(nameMap).length} player name mappings`);
+        if (Object.keys(nameMap).length > 0) {
+          const sample = Object.entries(nameMap).slice(0, 3);
+          console.log('Name map sample:', sample);
+        }
+      }
+    } catch (e) {
+      console.warn('Nomenclature fetch failed (non-fatal):', e.message);
+    }
+    loadEl.innerHTML = `<div class="spinner"></div><br>Processing data…`;
 
     const trad    = parseSheet(tradRes);
     const adv     = parseSheet(advRes);
@@ -562,7 +618,8 @@ async function refreshData() {
       const hustleGP = parseNum(resolveCol(hustleR, 'G', 'GP')) || gp;
 
       const p = {
-        PLAYER: name,
+        PLAYER: nameMap[name] || name, // Use HH nomenclature if available
+        PLAYER_NBA: name, // Keep original for lookups
         TEAM: team,
         GP: gp,
         MPG: mpg,
@@ -719,9 +776,10 @@ function update() {
   // Render
   const tbody = document.getElementById('tbody');
   tbody.innerHTML = '';
+  const maxScore = filtered.length > 0 ? Math.max(...filtered.map(p => p.DEF_SCORE)) : 35;
   for (const p of filtered) {
     const rankClass = p.RANK <= 5 ? 'top5' : p.RANK <= 15 ? 'top15' : '';
-    const barW = Math.round(p.DEF_SCORE * (80 / 35)); // scale bar to max ~80px at score 35
+    const barW = Math.round((p.DEF_SCORE / maxScore) * 80);
     const dfgDiff = p.PCT_PLUSMINUS !== null ? (p.PCT_PLUSMINUS * 100) : null;
 
     const tr = document.createElement('tr');
