@@ -118,7 +118,7 @@
   <div class="header-inner">
     <div class="header-brand">
       <h1>🛡️ Defensive Rankings</h1>
-      <span class="tag">v3.3 — Real Anchor</span>
+      <span class="tag">v3.4 — Real Anchor</span>
     </div>
     <div class="header-subtitle">Archetype-weighted composite score with team defense anchor bonus</div>
   </div>
@@ -501,10 +501,23 @@ async function refreshData() {
 
     // Build team defense lookup: team abbreviation → { drtg, rank }
     const teamDefMap = {};
+    console.log('TeamAdv headers:', teamAdv.headers);
+    if (teamAdv.rows[0]) console.log('TeamAdv row 0 keys:', Object.keys(teamAdv.rows[0]));
+    if (teamAdv.rows[0]) console.log('TeamAdv row 0 sample:', JSON.stringify(teamAdv.rows[0]).slice(0, 500));
+
+    // Auto-detect the team abbreviation column
+    let teamAbbrCol = null, teamDrtgCol = null;
+    for (const h of teamAdv.headers) {
+      const hu = h.toUpperCase();
+      if (!teamAbbrCol && (hu.includes('ABBREVIATION') || hu === 'TEAM_ABB' || hu === 'TEAM')) teamAbbrCol = h;
+      if (!teamDrtgCol && (hu === 'DEF_RATING' || hu === 'DRTG' || hu === 'DEF_RTG' || hu === 'DEFRTG')) teamDrtgCol = h;
+    }
+    console.log('Team col detection: abbr =', teamAbbrCol, ', drtg =', teamDrtgCol);
+
     const teamRows = teamAdv.rows
       .map(r => ({
-        team: resolveCol(r, 'TEAM_ABBREVIATION', 'TEAM_ABB', 'ABBREVIATION'),
-        drtg: parseNum(resolveCol(r, 'DEF_RATING', 'DRTG', 'DEF_RTG'))
+        team: (teamAbbrCol ? r[teamAbbrCol] : resolveCol(r, 'TEAM_ABBREVIATION', 'TEAM_ABB', 'ABBREVIATION', 'TEAM')).trim(),
+        drtg: parseNum(teamDrtgCol ? r[teamDrtgCol] : resolveCol(r, 'DEF_RATING', 'DRTG', 'DEF_RTG'))
       }))
       .filter(r => r.team && r.drtg !== null && r.drtg < 999);
     teamRows.sort((a, b) => a.drtg - b.drtg);
@@ -596,6 +609,20 @@ async function refreshData() {
     }
 
     console.log(`Player processing: ${players.length} passed, ${skippedNoName} no name, ${skippedGP} low GP, ${skippedMPG} low MPG, ${skippedNoDefData} no def data`);
+    
+    // Debug: check team matching
+    if (players.length > 0) {
+      const playerTeams = [...new Set(players.map(p => p.TEAM))].sort();
+      const mapTeams = Object.keys(teamDefMap).sort();
+      const matched = playerTeams.filter(t => teamDefMap[t]);
+      const unmatched = playerTeams.filter(t => !teamDefMap[t]);
+      console.log(`Team matching: ${matched.length} matched, ${unmatched.length} unmatched`);
+      if (unmatched.length > 0) console.log('Unmatched player teams:', unmatched);
+      if (mapTeams.length > 0) console.log('Map teams sample:', mapTeams.slice(0, 5));
+      // Check anchor-eligible players
+      const withRank = players.filter(p => p.TEAM_DEF_RANK && p.TEAM_DEF_RANK <= 15);
+      console.log(`Anchor-eligible players (top-15 team): ${withRank.length}`);
+    }
 
     if (players.length === 0) {
       // Diagnostic: show what columns we actually received
