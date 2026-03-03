@@ -118,7 +118,7 @@
   <div class="header-inner">
     <div class="header-brand">
       <h1>🛡️ Defensive Rankings</h1>
-      <span class="tag">v3.2 — Real Anchor</span>
+      <span class="tag">v3.3 — Real Anchor</span>
     </div>
     <div class="header-subtitle">Archetype-weighted composite score with team defense anchor bonus</div>
   </div>
@@ -451,12 +451,35 @@ async function refreshData() {
   document.getElementById('error').style.display = 'none';
 
   try {
-    const [tradRes, advRes, hustleRes, defTrkRes, teamAdvRes] = await Promise.all(
-      Object.entries(TABS).map(([key, tab]) => fetch(makeURL(tab)).then(r => {
-        if (!r.ok) throw new Error(`HTTP ${r.status} for ${tab}: ${r.statusText}`);
-        return r.json();
-      }).catch(err => { throw new Error(`Failed to fetch '${tab}': ${err.message}`); }))
-    );
+    // Fetch tabs sequentially with delay to avoid 429 rate limits
+    async function fetchTab(tab, retries = 3) {
+      for (let attempt = 0; attempt < retries; attempt++) {
+        const res = await fetch(makeURL(tab));
+        if (res.ok) return res.json();
+        if (res.status === 429) {
+          const wait = (attempt + 1) * 2000; // 2s, 4s, 6s backoff
+          console.log(`Rate limited on '${tab}', retrying in ${wait}ms...`);
+          await new Promise(r => setTimeout(r, wait));
+          continue;
+        }
+        throw new Error(`HTTP ${res.status} for ${tab}`);
+      }
+      throw new Error(`Failed after ${retries} retries for '${tab}'`);
+    }
+
+    const tabKeys = Object.keys(TABS);
+    const tabResults = {};
+    const loadEl = document.getElementById('loading');
+    for (let i = 0; i < tabKeys.length; i++) {
+      const key = tabKeys[i];
+      loadEl.innerHTML = `<div class="spinner"></div><br>Fetching ${TABS[key]}… (${i+1}/${tabKeys.length})`;
+      tabResults[key] = await fetchTab(TABS[key]);
+      // Small delay between requests
+      if (i < tabKeys.length - 1) await new Promise(r => setTimeout(r, 500));
+    }
+
+    const [tradRes, advRes, hustleRes, defTrkRes, teamAdvRes] =
+      [tabResults.trad, tabResults.adv, tabResults.hustle, tabResults.defTrk, tabResults.teamAdv];
 
     const trad    = parseSheet(tradRes);
     const adv     = parseSheet(advRes);
