@@ -118,7 +118,7 @@
   <div class="header-inner">
     <div class="header-brand">
       <h1>🛡️ Defensive Rankings</h1>
-      <span class="tag">v4.1 — Real Anchor</span>
+      <span class="tag">v4.2 — Real Anchor</span>
     </div>
     <div class="header-subtitle">Archetype-weighted composite score with team defense anchor bonus</div>
   </div>
@@ -408,13 +408,38 @@ function computeDefensiveScores(players) {
   }
 
   // Organic scoring: fixed linear transform on raw composite
-  // Z-score composites have stable distributions across seasons,
-  // so a fixed scale produces naturally varying top scores (~30-37)
-  // that allow meaningful cross-season comparison.
-  const SCORE_SCALE = 0.07;     // Controls spread
-  const SCORE_BASELINE = 14.5;  // Average defender ≈ 15
+  const SCORE_SCALE = 0.07;
+  const SCORE_BASELINE = 14.5;
   for (const p of players) {
-    p.DEF_SCORE = Math.max(0, p.FINAL_RAW * SCORE_SCALE + SCORE_BASELINE);
+    p.DEF_SCORE_RAW = Math.max(0, p.FINAL_RAW * SCORE_SCALE + SCORE_BASELINE);
+  }
+
+  // ═══ ADJUSTMENT 1: Games Played Availability ═══
+  // gpRatio = player GP / team GP (1.0 = played every game)
+  // Prorated score = raw × gpRatio, then average with raw
+  // Result: full availability → no change, half games → 25% penalty
+  for (const p of players) {
+    p.GP_RATIO = (p.TEAM_GP > 0) ? Math.min(1.0, p.GP / p.TEAM_GP) : 1.0;
+    p.DEF_SCORE_GP = p.DEF_SCORE_RAW * (1.0 + p.GP_RATIO) / 2.0;
+  }
+
+  // ═══ ADJUSTMENT 2: Per-Minute Efficiency Bonus ═══
+  // Reward players with high defensive score relative to minutes played
+  // Z-score SC/MPG across the pool, then apply a small bonus
+  const scPerMin = players.map(p => p.MPG > 0 ? p.DEF_SCORE_RAW / p.MPG : 0);
+  const effMean = scPerMin.reduce((a, b) => a + b, 0) / scPerMin.length;
+  const effStd = Math.sqrt(scPerMin.reduce((a, v) => a + (v - effMean) ** 2, 0) / scPerMin.length) || 1;
+  const EFF_WEIGHT = 0.08; // Controls how much efficiency shifts the score
+
+  for (let i = 0; i < players.length; i++) {
+    const p = players[i];
+    const effZ = (scPerMin[i] - effMean) / effStd;
+    p.EFF_Z = effZ;
+    // Efficiency multiplier: average defender = 1.0, +1σ = 1.08, -1σ = 0.92
+    p.EFF_MULT = 1.0 + EFF_WEIGHT * effZ;
+    // Clamp
+    p.EFF_MULT = Math.max(0.85, Math.min(1.20, p.EFF_MULT));
+    p.DEF_SCORE = Math.max(0, p.DEF_SCORE_GP * p.EFF_MULT);
   }
 
   // Rank
@@ -567,11 +592,12 @@ async function refreshData() {
         const name = resolveCol(r, 'TEAM_NAME').trim();
         const abbr = teamNameToAbbr[id] || '';
         const drtg = parseNum(resolveCol(r, 'DEF_RATING', 'DRTG', 'DEF_RTG'));
-        return { team: abbr, name, drtg };
+        const gp   = parseNum(resolveCol(r, 'GP', 'G')) || 0;
+        return { team: abbr, name, drtg, gp };
       })
       .filter(r => r.team && r.drtg !== null && r.drtg < 999);
     teamRows.sort((a, b) => a.drtg - b.drtg);
-    teamRows.forEach((t, i) => { teamDefMap[t.team] = { drtg: t.drtg, rank: i + 1, name: t.name }; });
+    teamRows.forEach((t, i) => { teamDefMap[t.team] = { drtg: t.drtg, rank: i + 1, name: t.name, gp: t.gp }; });
 
     console.log('Team defense map:', Object.keys(teamDefMap).length, 'teams', teamDefMap);
 
@@ -647,6 +673,7 @@ async function refreshData() {
         // Team defense
         TEAM_DEF_RATING: teamDef.drtg || null,
         TEAM_DEF_RANK:   teamDef.rank || null,
+        TEAM_GP:         teamDef.gp || 0,
       };
 
       // Archetype
@@ -847,11 +874,12 @@ function showTooltip(e, p) {
   tt.innerHTML = `
     <div class="tp-name">${p.PLAYER} · ${p.TEAM}</div>
     <div class="tp-row"><span class="tp-label">Archetype</span><span class="tp-val">${archLabel} (${(p.PERIM_W * 100).toFixed(0)}% perim)</span></div>
-    <div class="tp-row"><span class="tp-label">Def Score</span><span class="tp-val">${p.DEF_SCORE.toFixed(1)} / 100</span></div>
-    <div class="tp-row"><span class="tp-label">Base Raw</span><span class="tp-val">${p.BASE_RAW.toFixed(1)}</span></div>
+    <div class="tp-row"><span class="tp-label">Def Score</span><span class="tp-val">${p.DEF_SCORE.toFixed(1)}</span></div>
+    <div class="tp-row"><span class="tp-label">Base Raw</span><span class="tp-val">${p.DEF_SCORE_RAW.toFixed(1)}</span></div>
+    <div class="tp-row"><span class="tp-label">GP Avail.</span><span class="tp-val">${p.GP}/${p.TEAM_GP} (${(p.GP_RATIO * 100).toFixed(0)}%) → ×${((1 + p.GP_RATIO) / 2).toFixed(3)}</span></div>
+    <div class="tp-row"><span class="tp-label">Efficiency</span><span class="tp-val">${p.EFF_Z >= 0 ? '+' : ''}${p.EFF_Z.toFixed(2)}σ → ×${p.EFF_MULT.toFixed(3)}</span></div>
     <div class="tp-row"><span class="tp-label">Anchor Bonus</span><span class="tp-val">${p.ANCHOR_BONUS > 0.1 ? '+' + p.ANCHOR_BONUS.toFixed(1) : 'None'}</span></div>
     <div class="tp-row"><span class="tp-label">Team Defense</span><span class="tp-val">${teamRank} (${teamDrtg} DRTG)</span></div>
-    <div class="tp-row"><span class="tp-label">Charges / Loose Balls</span><span class="tp-val">${p.CHARGES_DRAWN_PG.toFixed(2)} / ${p.LOOSE_BALLS_RECOVERED_PG.toFixed(2)} per game</span></div>
   `;
   tt.style.display = 'block';
   moveTooltip(e);
