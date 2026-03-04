@@ -216,38 +216,10 @@ const API_KEY  = 'AIzaSyB9g7c6llswswuZQ2I5y2MwGk6BzYEtHsY';
 const BASE_URL = `https://sheets.googleapis.com/v4/spreadsheets/${STATS_ID}/values`;
 const makeURL  = tab => `${BASE_URL}/${encodeURIComponent(tab)}?key=${API_KEY}`;
 
-// Nomenclature sheet: maps NBA API names → HoopsMatic names
-const NOMEN_PUB = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vS2iZj3avZ_-CAWKu-f_pxZkf38M0quXQwMbyTXmHsN6-c9V8vU1l_sNaxg0y8dl07dqraU3_5Z3b8D/pub';
-const NOMEN_GID = '1197809522';
-const NOMEN_URL = `${NOMEN_PUB}?gid=${NOMEN_GID}&single=true&output=csv`;
-
 function parseNum(v) {
   if (v === undefined || v === null || v === '') return null;
   const n = parseFloat(String(v).replace(/,/g, ''));
   return isNaN(n) ? null : n;
-}
-
-function parseCSV(text) {
-  const rows = []; let current = '', inQuotes = false, row = [];
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (inQuotes) {
-      if (ch === '"' && text[i+1] === '"') { current += '"'; i++; }
-      else if (ch === '"') inQuotes = false;
-      else current += ch;
-    } else {
-      if (ch === '"') inQuotes = true;
-      else if (ch === ',') { row.push(current.trim()); current = ''; }
-      else if (ch === '\n' || ch === '\r') {
-        if (ch === '\r' && text[i+1] === '\n') i++;
-        row.push(current.trim());
-        if (row.length > 1 || row[0] !== '') rows.push(row);
-        row = []; current = '';
-      } else current += ch;
-    }
-  }
-  if (current || row.length > 0) { row.push(current.trim()); if (row.length > 1 || row[0] !== '') rows.push(row); }
-  return rows;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -295,26 +267,7 @@ async function refreshData() {
     const metaMatch = (meta || '').match(/Last Updated:\s*(.+)/);
     const lastUpdated = metaMatch ? metaMatch[1].trim() : 'Unknown';
 
-    // Fetch nomenclature for name mapping
-    loadEl.innerHTML = `<div class="spinner"></div><br>Applying nomenclature…`;
-    let nameMap = {};
-    try {
-      const nomenRes = await fetch(NOMEN_URL);
-      if (nomenRes.ok) {
-        const csvText = await nomenRes.text();
-        const csvRows = parseCSV(csvText);
-        for (const row of csvRows) {
-          const nbaName = (row[11] || '').trim();
-          const hhName  = (row[12] || '').trim();
-          if (nbaName && hhName && nbaName !== 'NBA NAME' && !nbaName.toLowerCase().startsWith('season')) {
-            nameMap[nbaName] = hhName;
-          }
-        }
-        console.log(`Nomenclature: ${Object.keys(nameMap).length} mappings`);
-      }
-    } catch (e) { console.warn('Nomenclature fetch failed (non-fatal):', e.message); }
-
-    // Build player array from pre-computed data
+    // Build player array from pre-computed data (names already mapped by Python)
     const players = [];
     const get = (row, col) => {
       const i = colIdx[col];
@@ -328,7 +281,7 @@ async function refreshData() {
       if (!name || !team) continue;
 
       const p = {
-        PLAYER: nameMap[name] || name,
+        PLAYER: name,
         PLAYER_NBA: name,
         TEAM: team,
         GP: parseInt(get(row, 'GP')) || 0,
