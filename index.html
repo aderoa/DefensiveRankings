@@ -74,6 +74,11 @@ tbody td { padding:0.55rem 0.5rem; vertical-align:middle; white-space:nowrap; }
 .footer a, footer a { color:var(--accent); text-decoration:none; }
 
 /* — Responsive — */
+.period-bar { display:flex; gap:0.5rem; }
+.period-btn { font-family:inherit; font-size:0.78rem; font-weight:600; padding:0.5rem 1rem; border-radius:8px; border:1px solid var(--border); background:var(--surface); color:var(--text2); cursor:pointer; transition:all 0.15s; }
+.period-btn:hover { border-color:var(--accent); color:var(--accent); }
+.period-btn.active { background:var(--accent-dim); border-color:var(--accent); color:var(--accent); }
+
 @media(max-width:900px) { .stats-bar{grid-template-columns:repeat(2,1fr);} .controls{flex-direction:column;} .search-box{min-width:100%;} }
 @media(max-width:600px) { .stats-bar{grid-template-columns:1fr 1fr;gap:0.5rem;} .stat-card{padding:0.75rem;} .stat-card .value{font-size:1.1rem;} .header{padding:1.25rem 1rem 1rem;} .header h1,.header-brand h1{font-size:1.25rem;} .table-container{padding:0 0.5rem;} td,th{padding:0.4rem 0.35rem;} }
 
@@ -153,6 +158,15 @@ td.anchor.zero { color:var(--text-muted); }
   <div class="stat-card"><div class="label">#1 Defender</div><div class="value" id="statTop">—</div></div>
   <div class="stat-card"><div class="label">Top Score</div><div class="value" id="statScore">—</div></div>
   <div class="stat-card"><div class="label">Last Updated</div><div class="value" id="statDate">—</div></div>
+</div>
+
+<div class="controls" style="margin-bottom:0.5rem;">
+  <div class="period-bar" id="periodBar">
+    <button class="period-btn active" data-period="season" onclick="setPeriod('season',this)">Season</button>
+    <button class="period-btn" data-period="last30" onclick="setPeriod('last30',this)">Last 30 Days</button>
+    <button class="period-btn" data-period="last7" onclick="setPeriod('last7',this)">Last 7 Days</button>
+    <button class="period-btn" data-period="lastday" onclick="setPeriod('lastday',this)">Last Day</button>
+  </div>
 </div>
 
 <div class="controls">
@@ -243,9 +257,73 @@ function parseNum(v) {
 }
 
 // ═══════════════════════════════════════════════════════
-// DATA LOADING — single pre-computed tab
+// DATA LOADING — multi-period from single tab
 // ═══════════════════════════════════════════════════════
 let appData = null;
+let allPeriods = {};
+let currentPeriod = 'season';
+
+const GP_DEFAULTS = { season: '40', last30: '0', last7: '0', lastday: '0' };
+const SECTION_MAP = { '[LAST_DAY]': 'lastday', '[LAST_7D]': 'last7', '[LAST_30D]': 'last30' };
+
+function parseSectionPlayers(rows) {
+  // Find header row within this section's rows
+  let headerIdx = -1, meta = '';
+  for (let i = 0; i < Math.min(rows.length, 5); i++) {
+    const firstCell = (rows[i][0] || '').trim();
+    if (firstCell.toLowerCase().startsWith('season') || firstCell.includes('Updated') || firstCell.toLowerCase().startsWith('last')) {
+      meta = firstCell; continue;
+    }
+    const nonEmpty = rows[i].filter(c => (c || '').trim() !== '').length;
+    if (nonEmpty < 3) continue;
+    headerIdx = i; break;
+  }
+  if (headerIdx < 0) return null;
+
+  const headers = rows[headerIdx].map(h => (h || '').trim());
+  const colIdx = {};
+  headers.forEach((h, i) => { colIdx[h] = i; });
+  const get = (row, col) => { const i = colIdx[col]; return i !== undefined ? (row[i] || '') : ''; };
+
+  const metaMatch = (meta || '').match(/Last Updated:\s*(.+)/);
+  const lastUpdated = metaMatch ? metaMatch[1].trim() : '';
+
+  const players = [];
+  for (let r = headerIdx + 1; r < rows.length; r++) {
+    const row = rows[r];
+    const name = get(row, 'PLAYER').trim();
+    const team = get(row, 'TEAM').trim();
+    if (!name || !team) continue;
+
+    const p = {
+      PLAYER: name, PLAYER_NBA: name, TEAM: team,
+      GP: parseInt(get(row, 'GP')) || 0,
+      MPG: parseFloat(get(row, 'MPG')) || 0,
+      DEF_SCORE: parseFloat(get(row, 'DEF_SCORE')) || 0,
+      DEF_SCORE_RAW: parseFloat(get(row, 'DEF_SCORE_RAW')) || 0,
+      STL_PG: parseFloat(get(row, 'STL_PG')) || 0,
+      BLK_PG: parseFloat(get(row, 'BLK_PG')) || 0,
+      DEFLECTIONS_PG: parseFloat(get(row, 'DEFLECTIONS_PG')) || 0,
+      CONTESTED_SHOTS_PG: parseFloat(get(row, 'CONTESTED_SHOTS_PG')) || 0,
+      D_FG_PCT: parseNum(get(row, 'D_FG_PCT')),
+      PCT_PLUSMINUS: parseNum(get(row, 'PCT_PLUSMINUS')),
+      DEF_RATING: parseNum(get(row, 'DEF_RATING')),
+      PERIM_W: parseFloat(get(row, 'PERIM_W')) || 0.5,
+      ANCHOR_BONUS: parseFloat(get(row, 'ANCHOR_BONUS')) || 0,
+      TEAM_DEF_RANK: parseInt(get(row, 'TEAM_DEF_RANK')) || null,
+      TEAM_DEF_RATING: parseNum(get(row, 'TEAM_DEF_RATING')),
+      GP_RATIO: parseFloat(get(row, 'GP_RATIO')) || 1,
+      EFF_MULT: parseFloat(get(row, 'EFF_MULT')) || 1,
+      SC_MPG: parseFloat(get(row, 'SC_MPG')) || 0,
+      TEAM_GP: parseInt(get(row, 'TEAM_GP')) || 82,
+    };
+    if (p.GP >= 1) players.push(p);
+  }
+
+  players.sort((a, b) => b.DEF_SCORE - a.DEF_SCORE);
+  players.forEach((p, i) => p.RANK = i + 1);
+  return { players, lastUpdated };
+}
 
 async function refreshData() {
   const btn = document.getElementById('refreshBtn');
@@ -259,87 +337,54 @@ async function refreshData() {
     const loadEl = document.getElementById('loading');
     loadEl.innerHTML = `<div class="spinner"></div><br>Fetching Defensive Rankings…`;
 
-    // Single fetch: pre-computed Defensive Rankings tab
     const res = await fetch(makeURL('Defensive_Rankings'));
     if (!res.ok) throw new Error(`HTTP ${res.status} fetching Defensive Rankings`);
     const data = await res.json();
 
     if (!data.values || data.values.length < 3) throw new Error('No data in Defensive Rankings tab');
 
-    // Parse: row 0 = metadata, find header row, then data
-    let meta = '', headerIdx = -1;
-    for (let i = 0; i < Math.min(data.values.length, 5); i++) {
-      const row = data.values[i];
+    // Split rows into sections by markers
+    const sections = []; // [{key, rows}]
+    let currentRows = [];
+    let currentKey = 'season';
+
+    for (const row of data.values) {
       const firstCell = (row[0] || '').trim();
-      if (firstCell.toLowerCase().startsWith('season') || firstCell.includes('Updated')) {
-        meta = firstCell; continue;
+      if (SECTION_MAP[firstCell]) {
+        if (currentRows.length > 0) sections.push({ key: currentKey, rows: currentRows });
+        currentKey = SECTION_MAP[firstCell];
+        currentRows = [];
+      } else {
+        currentRows.push(row);
       }
-      const nonEmpty = row.filter(c => (c || '').trim() !== '').length;
-      if (nonEmpty < 3) continue;
-      headerIdx = i; break;
     }
-    if (headerIdx < 0) throw new Error('Could not find header row');
+    if (currentRows.length > 0) sections.push({ key: currentKey, rows: currentRows });
 
-    const headers = data.values[headerIdx].map(h => (h || '').trim());
-    const colIdx = {};
-    headers.forEach((h, i) => { colIdx[h] = i; });
-
-    const metaMatch = (meta || '').match(/Last Updated:\s*(.+)/);
-    const lastUpdated = metaMatch ? metaMatch[1].trim() : 'Unknown';
-
-    // Build player array from pre-computed data (names already mapped by Python)
-    const players = [];
-    const get = (row, col) => {
-      const i = colIdx[col];
-      return i !== undefined ? (row[i] || '') : '';
-    };
-
-    for (let r = headerIdx + 1; r < data.values.length; r++) {
-      const row = data.values[r];
-      const name = get(row, 'PLAYER').trim();
-      const team = get(row, 'TEAM').trim();
-      if (!name || !team) continue;
-
-      const p = {
-        PLAYER: name,
-        PLAYER_NBA: name,
-        TEAM: team,
-        GP: parseInt(get(row, 'GP')) || 0,
-        MPG: parseFloat(get(row, 'MPG')) || 0,
-        DEF_SCORE: parseFloat(get(row, 'DEF_SCORE')) || 0,
-        DEF_SCORE_RAW: parseFloat(get(row, 'DEF_SCORE_RAW')) || 0,
-        STL_PG: parseFloat(get(row, 'STL_PG')) || 0,
-        BLK_PG: parseFloat(get(row, 'BLK_PG')) || 0,
-        DEFLECTIONS_PG: parseFloat(get(row, 'DEFLECTIONS_PG')) || 0,
-        CONTESTED_SHOTS_PG: parseFloat(get(row, 'CONTESTED_SHOTS_PG')) || 0,
-        D_FG_PCT: parseNum(get(row, 'D_FG_PCT')),
-        PCT_PLUSMINUS: parseNum(get(row, 'PCT_PLUSMINUS')),
-        DEF_RATING: parseNum(get(row, 'DEF_RATING')),
-        PERIM_W: parseFloat(get(row, 'PERIM_W')) || 0.5,
-        ANCHOR_BONUS: parseFloat(get(row, 'ANCHOR_BONUS')) || 0,
-        TEAM_DEF_RANK: parseInt(get(row, 'TEAM_DEF_RANK')) || null,
-        TEAM_DEF_RATING: parseNum(get(row, 'TEAM_DEF_RATING')),
-        GP_RATIO: parseFloat(get(row, 'GP_RATIO')) || 1,
-        EFF_MULT: parseFloat(get(row, 'EFF_MULT')) || 1,
-        SC_MPG: parseFloat(get(row, 'SC_MPG')) || 0,
-        TEAM_GP: parseInt(get(row, 'TEAM_GP')) || 82,
-      };
-      if (p.GP >= 1) players.push(p);
+    // Parse each section
+    allPeriods = {};
+    for (const sec of sections) {
+      const result = parseSectionPlayers(sec.rows);
+      if (result && result.players.length > 0) {
+        allPeriods[sec.key] = result;
+      }
     }
 
-    // Sort by DEF_SCORE descending
-    players.sort((a, b) => b.DEF_SCORE - a.DEF_SCORE);
-    players.forEach((p, i) => p.RANK = i + 1);
+    if (!allPeriods.season) throw new Error('No season data found');
 
-    console.log(`Loaded ${players.length} players from pre-computed tab`);
-    if (players[0]) console.log(`#1: ${players[0].PLAYER} (${players[0].DEF_SCORE})`);
+    console.log(`Loaded periods: ${Object.keys(allPeriods).join(', ')} (${Object.values(allPeriods).map(p => p.players.length + ' players').join(', ')})`);
 
-    if (players.length === 0) throw new Error('No players found in Defensive Rankings tab');
+    // Show/hide period buttons based on available data
+    document.querySelectorAll('.period-btn').forEach(btn => {
+      const period = btn.dataset.period;
+      if (period === 'season' || allPeriods[period]) {
+        btn.style.display = '';
+      } else {
+        btn.style.display = 'none';
+      }
+    });
 
-    appData = { players, lastUpdated, teamDefMap: {} };
-    buildStats();
-    buildTeamFilter();
-    update();
+    // Activate current period
+    setPeriod(currentPeriod);
 
     document.getElementById('loading').style.display = 'none';
     document.getElementById('mainTable').style.display = '';
@@ -352,6 +397,26 @@ async function refreshData() {
   }
   btn.textContent = '↻ Refresh';
   btn.disabled = false;
+}
+
+function setPeriod(period, btn) {
+  if (!allPeriods[period]) period = 'season';
+  currentPeriod = period;
+
+  appData = { players: allPeriods[period].players, lastUpdated: allPeriods[period].lastUpdated || allPeriods.season.lastUpdated, teamDefMap: {} };
+
+  // Update active button
+  document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+  const activeBtn = btn || document.querySelector(`.period-btn[data-period="${period}"]`);
+  if (activeBtn) activeBtn.classList.add('active');
+
+  // Set appropriate GP filter default
+  const gpFilter = document.getElementById('gpFilter');
+  gpFilter.value = GP_DEFAULTS[period] || '0';
+
+  buildStats();
+  buildTeamFilter();
+  update();
 }
 
 function buildStats() {
