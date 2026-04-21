@@ -263,7 +263,16 @@ let appData = null;
 let allPeriods = {};
 let currentPeriod = 'season';
 
-const GP_DEFAULTS = { season: '40', last30: '0', last7: '0', lastday: '0' };
+// Phase-aware GP defaults. The Worker injects ?phase=po when the user picks
+// the Playoffs tab; under PO nobody has 40+ games (max ~28), so the Season-
+// period default for PO is "All Players". RS and Combined keep 40+ as before.
+const URL_PHASE = new URLSearchParams(location.search).get('phase') || 'rs';
+const GP_DEFAULTS = {
+  season:  URL_PHASE === 'po' ? '0' : '40',
+  last30:  '0',
+  last7:   '0',
+  lastday: '0',
+};
 const SECTION_MAP = { '[LAST_DAY]': 'lastday', '[LAST_7D]': 'last7', '[LAST_30D]': 'last30' };
 
 function parseSectionPlayers(rows) {
