@@ -176,7 +176,7 @@ td.anchor.zero { color:var(--text-muted); }
   </div>
   <div class="filter-group">
     <label>Team</label>
-    <select id="teamFilter" onchange="update()"><option value="">All Teams</option></select>
+    <select id="teamFilter" onchange="syncTeamToUrl();update()"><option value="">All Teams</option></select>
   </div>
   <div class="filter-group">
     <label>Min GP</label>
@@ -192,25 +192,25 @@ td.anchor.zero { color:var(--text-muted); }
 </div>
 
 <div class="table-wrap">
-  <div class="loading" id="loading"><div class="spinner"></div><br>Fetching defensive stats from Google Sheets…</div>
+  <div class="loading" id="loading"><div class="spinner"></div><br>Loading defensive rankings…</div>
   <div class="error" id="error" style="display:none"></div>
   <table id="mainTable" style="display:none">
     <thead>
       <tr>
-        <th data-col="rank">#</th>
+        <th data-col="rank" title="Rank within the current filter">#</th>
         <th data-col="player">Player</th>
         <th data-col="team">Team</th>
-        <th data-col="score">Score</th>
-        <th data-col="stl">STL/G</th>
-        <th data-col="blk">BLK/G</th>
-        <th data-col="defl">DEFL/G</th>
-        <th data-col="contest">CONT/G</th>
-        <th data-col="dfgpct">OPP FG%</th>
-        <th data-col="dfgdiff">DIFF%</th>
-        <th data-col="drtg">DEF RTG</th>
-        <th data-col="gp">GP</th>
-        <th data-col="mpg">MPG</th>
-        <th data-col="spm">SC/MPG</th>
+        <th data-col="score" title="HoopsMatic Defensive Score — archetype-weighted composite of box stats, on-court defense, and team context. Higher is better.">Score</th>
+        <th data-col="stl" title="Steals per game">STL/G</th>
+        <th data-col="blk" title="Blocks per game">BLK/G</th>
+        <th data-col="defl" title="Deflections per game (hustle stat)">DEFL/G</th>
+        <th data-col="contest" title="Contested shots per game">CONT/G</th>
+        <th data-col="dfgpct" title="Opponent field goal % when this player is the closest defender">OPP FG%</th>
+        <th data-col="dfgdiff" title="Difference vs. opponents' overall FG% — negative means this defender suppresses shooting">DIFF%</th>
+        <th data-col="drtg" title="Team defensive rating with this player on court (points allowed per 100 possessions)">DEF RTG</th>
+        <th data-col="gp" title="Games played">GP</th>
+        <th data-col="mpg" title="Minutes per game">MPG</th>
+        <th data-col="spm" title="Score per minute — rewards efficient, high-impact-per-minute defenders">SC/MPG</th>
       </tr>
     </thead>
     <tbody id="tbody"></tbody>
@@ -401,8 +401,8 @@ async function refreshData() {
   } catch (err) {
     document.getElementById('loading').style.display = 'none';
     document.getElementById('error').style.display = 'block';
-    document.getElementById('error').textContent = `Error: ${err.message}`;
-    console.error(err);
+    document.getElementById('error').textContent = "Couldn't load the rankings. Try refreshing — if this keeps happening, the stats might be updating right now.";
+    console.error('[Defense]', err);
   }
   btn.textContent = '↻ Refresh';
   btn.disabled = false;
@@ -447,6 +447,25 @@ function buildTeamFilter() {
   for (const t of teams) {
     sel.innerHTML += `<option value="${t}">${t}</option>`;
   }
+  // Restore team filter from URL if a valid team is present
+  const urlTeam = new URLSearchParams(location.search).get('team');
+  if (urlTeam && [...sel.options].some(o => o.value === urlTeam)) {
+    sel.value = urlTeam;
+  }
+}
+
+// URL state: ?team= persists across reloads and makes filtered views shareable
+function syncTeamToUrl() {
+  const val = document.getElementById('teamFilter').value;
+  const url = new URL(location.href);
+  if (val) url.searchParams.set('team', val);
+  else url.searchParams.delete('team');
+  history.replaceState(null, '', url);
+}
+function setTeamFilter(team) {
+  document.getElementById('teamFilter').value = team;
+  syncTeamToUrl();
+  update();
 }
 
 // ═══════════════════════════════════════════════════════
@@ -494,6 +513,10 @@ function update() {
   // Render
   const tbody = document.getElementById('tbody');
   tbody.innerHTML = '';
+  if (filtered.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="14" style="text-align:center;padding:2rem 1rem;color:var(--text-secondary)">No players match the current filters. Try widening the team selection or lowering the GP threshold.</td></tr>';
+    return;
+  }
   const maxScore = filtered.length > 0 ? Math.max(...filtered.map(p => p.DEF_SCORE)) : 35;
   for (let idx = 0; idx < filtered.length; idx++) {
     const p = filtered[idx];
@@ -506,7 +529,7 @@ function update() {
     tr.innerHTML = `
       <td class="rank ${rankClass}">${rank}</td>
       <td class="player">${p.PLAYER}</td>
-      <td class="team" style="cursor:pointer;text-decoration:underline;text-underline-offset:2px" onclick="document.getElementById('teamFilter').value='${p.TEAM}';update()">${p.TEAM}</td>
+      <td class="team" style="cursor:pointer;text-decoration:underline;text-underline-offset:2px" onclick="setTeamFilter('${p.TEAM}')">${p.TEAM}</td>
       <td class="score">${p.DEF_SCORE.toFixed(1)}<span class="score-bar" style="width:${barW}px"></span></td>
       <td class="num">${p.STL_PG.toFixed(2)}</td>
       <td class="num">${p.BLK_PG.toFixed(2)}</td>
