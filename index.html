@@ -329,6 +329,26 @@ function parseSectionPlayers(rows) {
     if (p.GP >= 1) players.push(p);
   }
 
+  // ── Playoff GP penalty ──
+  // In PO, GP varies dramatically (1 to 28). Players with only a handful of
+  // games shouldn't rank near the top — small samples are too noisy. We apply
+  // a linear multiplicative penalty: full credit at FULL_GP+ games, scaling
+  // down linearly below that. A 1-GP player gets 10% of their raw score; a
+  // 10-GP player gets full credit.
+  //
+  // This mirrors the regular-season ranking philosophy where 8-GP players
+  // land well outside the top 50 despite high per-game numbers.
+  if (URL_PHASE === 'po') {
+    const FULL_GP = 10;  // GP at which a player receives full credit
+    players.forEach(p => {
+      p.DEF_SCORE_UNSHRUNK = p.DEF_SCORE;
+      p.DEF_SCORE_RAW_UNSHRUNK = p.DEF_SCORE_RAW;
+      const factor = Math.min(1, p.GP / FULL_GP);
+      p.DEF_SCORE = p.DEF_SCORE * factor;
+      p.DEF_SCORE_RAW = p.DEF_SCORE_RAW * factor;
+    });
+  }
+
   players.sort((a, b) => b.DEF_SCORE - a.DEF_SCORE);
   players.forEach((p, i) => p.RANK = i + 1);
   return { players, lastUpdated };
