@@ -378,9 +378,13 @@ async function refreshData() {
     // Also load the historical seasons tab (optional — index still works if it's absent)
     let histValues = [];
     try {
-      const rh = await fetch(makeURL('Defensive_History'));
-      if (rh.ok) { const dh = await rh.json(); if (dh.values && dh.values.length) histValues = dh.values; }
-    } catch (e) { console.warn('Defensive_History tab not loaded:', e); }
+      if (typeof window !== 'undefined' && window.__DEF_HISTORY__ && window.__DEF_HISTORY__.values) {
+        histValues = window.__DEF_HISTORY__.values;   // injected server-side by the Worker (proxied)
+      } else {
+        const rh = await fetch(makeURL('Defensive_History'));
+        if (rh.ok) { const dh = await rh.json(); if (dh.values && dh.values.length) histValues = dh.values; }
+      }
+    } catch (e) { console.warn('Defensive_History not loaded:', e); }
     const allValues = data.values.concat(histValues);
 
     // Split rows into sections by markers
