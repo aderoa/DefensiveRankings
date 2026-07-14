@@ -166,6 +166,7 @@ td.anchor.zero { color:var(--text-muted); }
     <button class="period-btn" data-period="last30" onclick="setPeriod('last30',this)">Last 30 Days</button>
     <button class="period-btn" data-period="last7" onclick="setPeriod('last7',this)">Last 7 Days</button>
     <button class="period-btn" data-period="lastday" onclick="setPeriod('lastday',this)">Last Day</button>
+    <select class="period-btn" id="seasonSelect" onchange="setPeriod(this.value)" style="display:none"><option value="">Past season ▾</option></select>
   </div>
 </div>
 
@@ -372,16 +373,25 @@ async function refreshData() {
 
     if (!data.values || data.values.length < 3) throw new Error('No data in Defensive Rankings tab');
 
+    // Also load the historical seasons tab (optional — index still works if it's absent)
+    let histValues = [];
+    try {
+      const rh = await fetch(makeURL('Defensive_History'));
+      if (rh.ok) { const dh = await rh.json(); if (dh.values && dh.values.length) histValues = dh.values; }
+    } catch (e) { console.warn('Defensive_History tab not loaded:', e); }
+    const allValues = data.values.concat(histValues);
+
     // Split rows into sections by markers
     const sections = []; // [{key, rows}]
     let currentRows = [];
     let currentKey = 'season';
 
-    for (const row of data.values) {
+    for (const row of allValues) {
       const firstCell = (row[0] || '').trim();
-      if (SECTION_MAP[firstCell]) {
+      const seasonMatch = firstCell.match(/^\[(\d{4}-\d{2})\]$/);
+      if (SECTION_MAP[firstCell] || seasonMatch) {
         if (currentRows.length > 0) sections.push({ key: currentKey, rows: currentRows });
-        currentKey = SECTION_MAP[firstCell];
+        currentKey = seasonMatch ? seasonMatch[1] : SECTION_MAP[firstCell];
         currentRows = [];
       } else {
         currentRows.push(row);
@@ -412,6 +422,15 @@ async function refreshData() {
       }
     });
 
+    // Populate the historical-season dropdown from any [YYYY-YY] periods that loaded
+    const seasonKeys = Object.keys(allPeriods).filter(k => /^\d{4}-\d{2}$/.test(k)).sort().reverse();
+    const seasonSelect = document.getElementById('seasonSelect');
+    if (seasonSelect && seasonKeys.length) {
+      seasonSelect.innerHTML = '<option value="">Past season \u25be</option>' +
+        seasonKeys.map(k => `<option value="${k}">${k}</option>`).join('');
+      seasonSelect.style.display = '';
+    }
+
     // Activate current period
     setPeriod(currentPeriod);
 
@@ -429,19 +448,27 @@ async function refreshData() {
 }
 
 function setPeriod(period, btn) {
-  if (!allPeriods[period]) period = 'season';
+  if (!period || !allPeriods[period]) period = 'season';
   currentPeriod = period;
 
   appData = { players: allPeriods[period].players, lastUpdated: allPeriods[period].lastUpdated || allPeriods.season.lastUpdated, teamDefMap: {} };
 
-  // Update active button
-  document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
-  const activeBtn = btn || document.querySelector(`.period-btn[data-period="${period}"]`);
-  if (activeBtn) activeBtn.classList.add('active');
+  const isSeason = /^\d{4}-\d{2}$/.test(period);
+  const seasonSelect = document.getElementById('seasonSelect');
 
-  // Set appropriate GP filter default
+  // Update active state across the period buttons + the season dropdown
+  document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+  if (isSeason) {
+    if (seasonSelect) { seasonSelect.value = period; seasonSelect.classList.add('active'); }
+  } else {
+    if (seasonSelect) { seasonSelect.value = ''; seasonSelect.classList.remove('active'); }
+    const activeBtn = btn || document.querySelector(`.period-btn[data-period="${period}"]`);
+    if (activeBtn) activeBtn.classList.add('active');
+  }
+
+  // GP filter default: historical seasons behave like the live season (Min GP 40)
   const gpFilter = document.getElementById('gpFilter');
-  gpFilter.value = GP_DEFAULTS[period] || '0';
+  gpFilter.value = GP_DEFAULTS[period] || (isSeason ? '40' : '0');
 
   buildStats();
   buildTeamFilter();
