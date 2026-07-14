@@ -1,105 +1,670 @@
-#!/usr/bin/env python3
-"""
-nba_defense_history.py — backfill the Defensive Rating index with every season since
-2015-16 (first year of hustle stats), using the SAME fetch + scoring as the live pipeline.
-
-It reuses your existing code so historical DEF_SCOREs match the current-season logic exactly
-(no formula drift):
-    fetch_defense_tabs          <- nba_defense_stats.py
-    compute_defensive_rankings  <- nba_season_stats.py
-
-For each season it runs fetch -> compute -> the same DEF_SCORE table your current-season
-'season' section produces, then emits it as a [YYYY-YY] section block.
-
-OUTPUT: defense_history_sections.csv — one block per season:
-    [2015-16]
-    <header row: PLAYER, TEAM, GP, MPG, DEF_SCORE, DEF_SCORE_RAW, STL_PG, ... >
-    <player rows>
-    [2016-17]
-    ...
-Append that to the `Defensive_Rankings` sheet AFTER the existing sections. The index already
-parses [MARKER] blocks by name, so column order doesn't matter — only the headers do.
-
-RUN WHERE stats.nba.com IS REACHABLE:
-    Google Colab is easiest (its network reaches stats.nba.com and bypasses the local
-    antivirus HTTPS inspection that blocks it on your machine). Upload these three files
-    alongside it — nba_defense_history.py, nba_defense_stats.py, nba_season_stats.py — plus
-    `!pip install nba_api pandas`, then run and download defense_history_sections.csv.
-
-    python nba_defense_history.py            # all seasons 2015-16 .. 2024-25
-    python nba_defense_history.py 2015-16     # just one season (re-run a failure)
-"""
-import csv
-import sys
-import time
-import traceback
-
-import pandas as pd
-
-try:
-    from nba_defense_stats import fetch_defense_tabs
-    from nba_season_stats import compute_defensive_rankings
-except Exception as e:  # noqa: BLE001
-    print("Could not import the pipeline functions. Make sure nba_defense_stats.py AND "
-          "nba_season_stats.py are in the same folder as this script.")
-    print("Import error:", e)
-    raise
-
-# 2016-17 .. 2025-26 (2015-16 excluded: broken first-year hustle data). (2025-26 is already the live 'season' section.)
-SEASONS = [f"{y}-{str(y + 1)[-2:]}" for y in range(2016, 2026)]
-OUT = "defense_history_sections.csv"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NBA Defensive Rankings — Hoopsmatic</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* === HOOPSMATIC DESIGN SYSTEM v1.0 === */
+:root {
+  --bg: #f8f9fa; --surface: #fff; --surface2: #f3f4f6;
+  --border: #e2e5e9; --text: #1a1a2e; --text2: #5a6070; --text-muted: #8892a6;
+  --accent: #3b82f6; --accent-dim: rgba(59,130,246,0.07);
+  --accent-gold: #f0b637; --accent-cyan: #0ea5e9;
+  --green: #16a34a; --red: #dc2626; --orange: #f59e0b;
+  --surplus-pos: #10b981; --surplus-neg: #ef4444; --surplus-neutral: #6b7280;
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'DM Sans',-apple-system,BlinkMacSystemFont,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; line-height:1.5; }
+::-webkit-scrollbar{height:5px;width:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#d1d5db;border-radius:3px}
 
 
-def season_ranking(season):
-    """Fetch + score one season, returning the DEF_SCORE DataFrame (or None)."""
-    data = fetch_defense_tabs(season, "Regular Season")
-    if not data:
-        return None
-    result = compute_defensive_rankings(data, period="season")   # same call main() uses
-    if result is None:
-        return None
-    df = result[0] if isinstance(result, tuple) else result       # returns (df, ref_stats)
-    return df if (df is not None and len(df) > 0) else None
+/* — Header — */
+.header { padding:1.5rem 2rem 0.75rem; }
+.header-inner { max-width:1400px; margin:0 auto; display:flex; align-items:baseline; gap:0.75rem; flex-wrap:wrap; }
+.header h1, .header-brand h1 { font-weight:800; font-size:1.5rem; letter-spacing:-0.02em; color:var(--text); }
+.header .tag { font-family:'JetBrains Mono','DM Mono',monospace; font-size:0.6rem; color:var(--accent); background:var(--accent-dim); padding:0.2em 0.6em; border-radius:4px; letter-spacing:0.04em; }
+.header-subtitle { color:var(--text2); font-size:0.85rem; }
 
 
-def main():
-    only = sys.argv[1] if len(sys.argv) > 1 else None
-    seasons = [only] if only else SEASONS
+/* — Stat Cards — */
+.stats-bar { max-width:1400px; margin:1rem auto 0; padding:0 2rem; display:grid; grid-template-columns:repeat(4,1fr); gap:0.75rem; }
+.stat-card { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:1rem 1.15rem; }
+.stat-card .label { font-family:'JetBrains Mono','DM Mono',monospace; font-size:0.6rem; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-muted); margin-bottom:0.2rem; }
+.stat-card .value { font-weight:700; font-size:1.35rem; color:var(--text); }
+.stat-card .value .unit { font-size:0.8rem; font-weight:400; color:var(--text2); }
 
-    blocks = []
-    for s in seasons:
-        print(f"[{s}] fetch + score ...", flush=True)
-        try:
-            df = season_ranking(s)
-        except Exception as e:  # noqa: BLE001
-            print(f"  !! {s} FAILED: {str(e)[:120]}  (re-run one season:  python {sys.argv[0]} {s})")
-            traceback.print_exc()
-            continue
-        if df is None:
-            print(f"  ⚠ {s}: no data returned")
-            continue
-        top = df.iloc[0]
-        print(f"  ✓ {s}: {len(df)} players — top: {top.get('PLAYER', '?')} ({top.get('DEF_SCORE', '?')})")
-        blocks.append((s, df))
-        time.sleep(2)   # be polite to stats.nba.com between seasons
+/* — Controls — */
+.controls { max-width:1400px; margin:1.25rem auto 0; padding:0 2rem; display:flex; gap:0.75rem; flex-wrap:wrap; align-items:center; }
+.search-box { flex:1; min-width:200px; position:relative; }
+.search-box input { width:100%; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:0.55rem 0.85rem 0.55rem 2.3rem; color:var(--text); font-family:inherit; font-size:0.85rem; outline:none; transition:border-color 0.2s; }
+.search-box input:focus { border-color:var(--accent); }
+.search-box input::placeholder { color:var(--text-muted); }
+.search-box .icon { position:absolute; left:0.8rem; top:50%; transform:translateY(-50%); color:var(--text-muted); font-size:0.85rem; }
+.filter-group { display:flex; gap:0.5rem; align-items:center; }
+.filter-group label { font-size:0.7rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.05em; font-weight:600; }
+select { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:0.55rem 0.85rem; color:var(--text); font-family:inherit; font-size:0.85rem; outline:none; cursor:pointer; }
+select:focus { border-color:var(--accent); }
 
-    if not blocks:
-        print("\nNothing produced — stats.nba.com is unreachable from here. Run this in Google Colab.")
-        sys.exit(1)
+/* — Buttons — */
+.ctrl-btn { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:0.5rem 1rem; color:var(--text); font-family:inherit; font-size:0.82rem; font-weight:500; cursor:pointer; transition:border-color 0.15s, background 0.15s; white-space:nowrap; }
+.ctrl-btn:hover:not(:disabled) { border-color:var(--accent); background:var(--accent-dim); }
+.ctrl-btn:disabled { opacity:0.4; cursor:default; }
+.ctrl-btn.active { border-color:var(--accent); background:var(--accent-dim); color:var(--accent); font-weight:600; }
 
-    cols = list(blocks[0][1].columns)   # header names the index maps by
-    with open(OUT, "w", encoding="utf-8", newline="") as f:
-        w = csv.writer(f)
-        for s, df in blocks:
-            w.writerow([f"[{s}]"])                                   # section marker
-            w.writerow(cols)                                          # header row
-            for _, row in df[cols].iterrows():
-                w.writerow(["" if pd.isna(v) else v for v in row.tolist()])
+/* — Tables — */
+.table-container { max-width:1400px; margin:1.25rem auto 3rem; padding:0 2rem; overflow-x:auto; }
+table { width:100%; border-collapse:collapse; font-size:0.82rem; }
+thead th { position:sticky; top:0; z-index:10; background:var(--surface2); font-family:'JetBrains Mono','DM Mono',monospace; font-size:0.62rem; font-weight:500; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted); padding:0.6rem 0.5rem; text-align:left; border-bottom:1px solid var(--border); white-space:nowrap; cursor:pointer; user-select:none; }
+thead th:hover { color:var(--accent); }
+tbody tr { border-bottom:1px solid var(--border); transition:background 0.12s; }
+tbody tr:hover { background:rgba(59,130,246,0.03); }
+tbody td { padding:0.55rem 0.5rem; vertical-align:middle; white-space:nowrap; }
 
-    print(f"\nWrote {len(blocks)} season block(s) -> {OUT}")
-    print("Next: append it to the Defensive_Rankings sheet, and add [YYYY-YY] -> period entries")
-    print("to SECTION_MAP in the index (I can do that HTML part for you).")
+/* — Loading & Errors — */
+.loading-overlay, .loading-state { text-align:center; padding:4rem 2rem; color:var(--text2); }
+.loading-overlay .spinner, .loading-spinner { display:inline-block; width:36px; height:36px; border:3px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:hmSpin 0.8s linear infinite; margin:0 auto 1rem; }
+@keyframes hmSpin { to { transform:rotate(360deg); } }
+.loading-overlay p { color:var(--text2); font-size:0.9rem; }
+.error-msg { color:var(--red); max-width:600px; margin:0 auto; text-align:center; }
 
+/* — Footer — */
+.footer { max-width:1400px; margin:0 auto; padding:1.5rem 2rem 2.5rem; text-align:center; font-size:0.75rem; color:var(--text-muted); border-top:1px solid var(--border); }
+.footer a, footer a { color:var(--accent); text-decoration:none; }
 
-if __name__ == "__main__":
-    main()
+/* — Responsive — */
+.period-bar { display:flex; gap:0.5rem; }
+.period-btn { font-family:inherit; font-size:0.78rem; font-weight:600; padding:0.5rem 1rem; border-radius:8px; border:1px solid var(--border); background:var(--surface); color:var(--text2); cursor:pointer; transition:all 0.15s; }
+.period-btn:hover { border-color:var(--accent); color:var(--accent); }
+.period-btn.active { background:var(--accent-dim); border-color:var(--accent); color:var(--accent); }
+
+@media(max-width:900px) { .stats-bar{grid-template-columns:repeat(2,1fr);} .controls{flex-direction:column;} .search-box{min-width:100%;} }
+@media(max-width:600px) { .stats-bar{grid-template-columns:1fr 1fr;gap:0.5rem;} .stat-card{padding:0.75rem;} .stat-card .value{font-size:1.1rem;} .header{padding:1.25rem 1rem 1rem;} .header h1,.header-brand h1{font-size:1.25rem;} .table-container{padding:0 0.5rem;} td,th{padding:0.4rem 0.35rem;} }
+
+/* — Defensive Rankings specific — */
+--border-light: #eef0f2;
+--accent2: #2563eb;
+--green-dim: rgba(22,163,74,0.1);
+--red-dim: rgba(220,38,38,0.1);
+--interior: #dc6843;
+--perimeter: #3b82f6;
+--mix: #8b5cf6;
+}
+
+.header-brand { display:flex; align-items:baseline; gap:0.75rem; margin-bottom:0.15rem; }
+.stat-card { border-radius:10px; box-shadow:0 1px 3px rgba(0,0,0,0.04); }
+.search-box input:focus { box-shadow:0 0 0 3px var(--accent-dim); }
+.filter-group select { -webkit-appearance:none; appearance:none; padding-right:2rem; background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%235a6070'%3E%3Cpath d='M6 8L1 3h10z'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 0.6rem center; }
+.filter-group select:focus { box-shadow:0 0 0 3px var(--accent-dim); }
+
+.table-wrap { max-width:1400px; margin:1.25rem auto 3rem; padding:0 2rem; overflow-x:auto; }
+thead th { border-bottom:2px solid var(--accent); }
+thead th.sorted-asc::after { content:' ▲'; color:var(--accent); }
+thead th.sorted-desc::after { content:' ▼'; color:var(--accent); }
+tbody tr { border-bottom:1px solid var(--border-light); }
+tbody tr:hover { background:var(--accent-dim); }
+
+td.rank { font-weight:700; color:var(--text-muted); min-width:32px; text-align:center; }
+td.rank.top5 { color:var(--orange); }
+td.rank.top15 { color:var(--accent-cyan); }
+td.player { font-weight:600; max-width:180px; overflow:hidden; text-overflow:ellipsis; }
+td.team { font-family:'DM Mono',monospace; font-size:0.72rem; color:var(--text2); }
+td.score { font-weight:700; font-size:0.95rem; }
+td.archetype { font-family:'DM Mono',monospace; font-size:0.68rem; }
+td.archetype.interior { color:var(--interior); }
+td.archetype.perimeter { color:var(--perimeter); }
+td.archetype.mix { color:var(--mix); }
+td.num { font-family:'DM Mono',monospace; font-size:0.75rem; color:var(--text2); text-align:right; }
+td.num.good { color:var(--green); }
+td.num.bad { color:var(--red); }
+td.anchor { font-family:'DM Mono',monospace; font-size:0.75rem; text-align:right; }
+td.anchor.pos { color:var(--green); }
+td.anchor.zero { color:var(--text-muted); }
+
+.score-bar { display:inline-block; height:5px; border-radius:3px; background:var(--accent); margin-left:6px; vertical-align:middle; transition:width 0.3s; opacity:0.7; }
+
+.error { text-align:left; padding:3rem 2rem; color:var(--red); max-width:1400px; margin:0 auto; white-space:pre-wrap; font-family:'DM Mono',monospace; font-size:0.72rem; line-height:1.8; }
+
+.methodology { display:none; }
+.methodology details { background:var(--surface); border:1px solid var(--border-light); border-radius:10px; box-shadow:0 1px 3px rgba(0,0,0,0.04); }
+.methodology summary { padding:1rem 1.25rem; cursor:pointer; font-size:1rem; font-weight:700; letter-spacing:-0.01em; color:var(--text2); }
+.methodology summary:hover { color:var(--text); }
+.methodology .content { padding:0 1.25rem 1.25rem; font-size:0.82rem; color:var(--text2); line-height:1.7; }
+.methodology .content h4 { color:var(--accent); font-weight:700; margin:1rem 0 0.4rem; font-size:0.9rem; }
+.methodology .content code { font-family:'DM Mono',monospace; font-size:0.72rem; background:var(--accent-dim); padding:0.15em 0.4em; border-radius:4px; }
+
+.tooltip { display:none !important; }
+.tooltip .tp-name { font-size:0.95rem; font-weight:700; color:var(--text); margin-bottom:0.35rem; }
+.tooltip .tp-row { display:flex; justify-content:space-between; gap:1.5rem; }
+.tooltip .tp-label { color:var(--text-muted); }
+.tooltip .tp-val { font-family:'DM Mono',monospace; color:var(--text); font-weight:500; }
+
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="header-inner">
+    <div class="header-brand">
+      <h1>🛡️ Defensive Rankings</h1>
+      <span class="tag">v5.2 — Real Anchor</span>
+    </div>
+    <div class="header-subtitle">Archetype-weighted composite score with team defense anchor bonus</div>
+  </div>
+</div>
+
+<div class="stats-bar" id="statsBar">
+  <div class="stat-card"><div class="label">Players Ranked</div><div class="value" id="statPlayers">—</div></div>
+  <div class="stat-card"><div class="label">#1 Defender</div><div class="value" id="statTop">—</div></div>
+  <div class="stat-card"><div class="label">Top Score</div><div class="value" id="statScore">—</div></div>
+  <div class="stat-card"><div class="label">Last Updated</div><div class="value" id="statDate">—</div></div>
+</div>
+
+<div class="controls" style="margin-bottom:0.5rem;">
+  <div class="period-bar" id="periodBar">
+    <button class="period-btn active" data-period="season" onclick="setPeriod('season',this)">Season</button>
+    <button class="period-btn" data-period="last30" onclick="setPeriod('last30',this)">Last 30 Days</button>
+    <button class="period-btn" data-period="last7" onclick="setPeriod('last7',this)">Last 7 Days</button>
+    <button class="period-btn" data-period="lastday" onclick="setPeriod('lastday',this)">Last Day</button>
+    <select class="period-btn" id="seasonSelect" onchange="setPeriod(this.value)" style="display:none"><option value="">Past season ▾</option></select>
+  </div>
+</div>
+
+<div class="controls">
+  <div class="search-box">
+    <span class="icon">🔍</span>
+    <input type="text" id="search" placeholder="Search player or team…" oninput="update()">
+  </div>
+  <div class="filter-group">
+    <label>Team</label>
+    <select id="teamFilter" onchange="syncTeamToUrl();update()"><option value="">All Teams</option></select>
+  </div>
+  <div class="filter-group">
+    <label>Min GP</label>
+    <select id="gpFilter" onchange="update()">
+      <option value="40">40+</option>
+      <option value="30">30+</option>
+      <option value="20">20+</option>
+      <option value="50">50+</option>
+      <option value="0">All Players</option>
+    </select>
+  </div>
+  <button id="refreshBtn" onclick="refreshData()" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:0.5rem 1.1rem;font-family:inherit;font-size:0.82rem;font-weight:600;cursor:pointer;transition:background 0.15s;">↻ Refresh</button>
+</div>
+
+<div class="table-wrap">
+  <div class="loading" id="loading"><div class="spinner"></div><br>Loading defensive rankings…</div>
+  <div class="error" id="error" style="display:none"></div>
+  <table id="mainTable" style="display:none">
+    <thead>
+      <tr>
+        <th data-col="rank" title="Rank within the current filter">#</th>
+        <th data-col="player">Player</th>
+        <th data-col="team">Team</th>
+        <th data-col="score" title="HoopsMatic Defensive Score — archetype-weighted composite of box stats, on-court defense, and team context. Higher is better.">Score</th>
+        <th data-col="stl" title="Steals per game">STL/G</th>
+        <th data-col="blk" title="Blocks per game">BLK/G</th>
+        <th data-col="defl" title="Deflections per game (hustle stat)">DEFL/G</th>
+        <th data-col="contest" title="Contested shots per game">CONT/G</th>
+        <th data-col="dfgpct" title="Opponent field goal % when this player is the closest defender">OPP FG%</th>
+        <th data-col="dfgdiff" title="Difference vs. opponents' overall FG% — negative means this defender suppresses shooting">DIFF%</th>
+        <th data-col="drtg" title="Team defensive rating with this player on court (points allowed per 100 possessions)">DEF RTG</th>
+        <th data-col="gp" title="Games played">GP</th>
+        <th data-col="mpg" title="Minutes per game">MPG</th>
+        <th data-col="spm" title="Score per minute — rewards efficient, high-impact-per-minute defenders">SC/MPG</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+</div>
+
+<div class="methodology">
+  <details>
+    <summary>Methodology — How the Defensive Score Works</summary>
+    <div class="content">
+      <h4>Archetype Detection</h4>
+      Players are classified on a perimeter↔interior spectrum using a sigmoid on BLK/G. High-block bigs get interior weights; guards/wings get perimeter weights. This determines which stats matter most for each player.
+
+      <h4>Interior Formula (weights sum to 100)</h4>
+      <code>DEF FG% DIFF (22)</code> · <code>BLK/G (22)</code> · <code>DEF_RATING (14)</code> · <code>NET_RATING (10)</code> · <code>DEF FG% (10)</code> · <code>CONTESTED/G (8)</code> · <code>STL/G (5)</code> · <code>DEFL/G (5)</code> · <code>REB/G (4)</code>
+
+      <h4>Perimeter Formula (weights sum to 100)</h4>
+      <code>STL/G (22)</code> · <code>DEFL/G (16)</code> · <code>DEF FG% DIFF (12)</code> · <code>PF/G (8)</code> · <code>NET_RATING (8)</code> · <code>WIN (8)</code> · <code>CHARGES/G (6)</code> · <code>DEF FG% (6)</code> · <code>DEF_RATING (6)</code> · <code>MPG (4)</code> · <code>LOOSE BALLS/G (4)</code>
+
+      <h4>Anchor Bonus (up to +18 pts)</h4>
+      Players on top-15 defensive teams (by real team DRTG) earn a bonus scaled by: team rank tier (top-5/10/15), minutes share (25–34+ MPG), scheme factor (player DRTG vs team DRTG), and win factor (vs median).
+
+      <h4>Scoring</h4>
+      All stats are z-scored within the current season pool. The final composite uses a fixed linear transform (<code>score = raw × 0.07 + 14.5</code>) so that an average defender scores ~15, elite starters land in the mid-to-high 20s, and DPOY-caliber seasons reach the low-to-mid 30s. Because the scale is fixed (not min-max normalized), scores are comparable across seasons.
+    </div>
+  </details>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+// ═══════════════════════════════════════════════════════
+// GOOGLE SHEETS CONFIG
+// ═══════════════════════════════════════════════════════
+const STATS_ID = '1JH2FUBIyQ1zEHzZBxgP8vHBZ7d8EtP5-fSVG3zMgCgg';
+const API_KEY  = 'AIzaSyB9g7c6llswswuZQ2I5y2MwGk6BzYEtHsY';
+const BASE_URL = `https://sheets.googleapis.com/v4/spreadsheets/${STATS_ID}/values`;
+const makeURL  = tab => `${BASE_URL}/${encodeURIComponent(tab)}?key=${API_KEY}`;
+
+function parseNum(v) {
+  if (v === undefined || v === null || v === '') return null;
+  const n = parseFloat(String(v).replace(/,/g, ''));
+  return isNaN(n) ? null : n;
+}
+
+// ═══════════════════════════════════════════════════════
+// DATA LOADING — multi-period from single tab
+// ═══════════════════════════════════════════════════════
+let appData = null;
+let allPeriods = {};
+let currentPeriod = 'season';
+
+// Phase-aware GP defaults. The Worker injects ?phase=po when the user picks
+// the Playoffs tab; under PO nobody has 40+ games (max ~28), so the Season-
+// period default for PO is "All Players". RS and Combined keep 40+ as before.
+const URL_PHASE = new URLSearchParams(location.search).get('phase') || 'rs';
+const GP_DEFAULTS = {
+  season:  URL_PHASE === 'po' ? '0' : '40',
+  last30:  '0',
+  last7:   '0',
+  lastday: '0',
+};
+const SECTION_MAP = { '[LAST_DAY]': 'lastday', '[LAST_7D]': 'last7', '[LAST_30D]': 'last30' };
+
+function parseSectionPlayers(rows) {
+  // Find header row within this section's rows
+  let headerIdx = -1, meta = '';
+  for (let i = 0; i < Math.min(rows.length, 5); i++) {
+    const firstCell = (rows[i][0] || '').trim();
+    if (firstCell.toLowerCase().startsWith('season') || firstCell.includes('Updated') || firstCell.toLowerCase().startsWith('last')) {
+      meta = firstCell; continue;
+    }
+    const nonEmpty = rows[i].filter(c => (c || '').trim() !== '').length;
+    if (nonEmpty < 3) continue;
+    headerIdx = i; break;
+  }
+  if (headerIdx < 0) return null;
+
+  const headers = rows[headerIdx].map(h => (h || '').trim());
+  const colIdx = {};
+  headers.forEach((h, i) => { colIdx[h] = i; });
+  const get = (row, col) => { const i = colIdx[col]; return i !== undefined ? (row[i] || '') : ''; };
+
+  const metaMatch = (meta || '').match(/Last Updated:\s*(.+)/);
+  const lastUpdated = metaMatch ? metaMatch[1].trim() : '';
+  const seasonMeta = (meta || '').match(/Season:\s*(\d{4}-\d{2})/);
+  const seasonLabel = seasonMeta ? seasonMeta[1] : '';
+
+  const players = [];
+  for (let r = headerIdx + 1; r < rows.length; r++) {
+    const row = rows[r];
+    const name = get(row, 'PLAYER').trim();
+    const team = get(row, 'TEAM').trim();
+    if (!name || !team) continue;
+
+    const p = {
+      PLAYER: name, PLAYER_NBA: name, TEAM: team,
+      GP: parseInt(get(row, 'GP')) || 0,
+      MPG: parseFloat(get(row, 'MPG')) || 0,
+      DEF_SCORE: parseFloat(get(row, 'DEF_SCORE')) || 0,
+      DEF_SCORE_RAW: parseFloat(get(row, 'DEF_SCORE_RAW')) || 0,
+      STL_PG: parseFloat(get(row, 'STL_PG')) || 0,
+      BLK_PG: parseFloat(get(row, 'BLK_PG')) || 0,
+      DEFLECTIONS_PG: parseFloat(get(row, 'DEFLECTIONS_PG')) || 0,
+      CONTESTED_SHOTS_PG: parseFloat(get(row, 'CONTESTED_SHOTS_PG')) || 0,
+      D_FG_PCT: parseNum(get(row, 'D_FG_PCT')),
+      PCT_PLUSMINUS: parseNum(get(row, 'PCT_PLUSMINUS')),
+      DEF_RATING: parseNum(get(row, 'DEF_RATING')),
+      PERIM_W: parseFloat(get(row, 'PERIM_W')) || 0.5,
+      ANCHOR_BONUS: parseFloat(get(row, 'ANCHOR_BONUS')) || 0,
+      TEAM_DEF_RANK: parseInt(get(row, 'TEAM_DEF_RANK')) || null,
+      TEAM_DEF_RATING: parseNum(get(row, 'TEAM_DEF_RATING')),
+      GP_RATIO: parseFloat(get(row, 'GP_RATIO')) || 1,
+      EFF_MULT: parseFloat(get(row, 'EFF_MULT')) || 1,
+      SC_MPG: parseFloat(get(row, 'SC_MPG')) || 0,
+      TEAM_GP: parseInt(get(row, 'TEAM_GP')) || 82,
+    };
+    if (p.GP >= 1) players.push(p);
+  }
+
+  // ── Playoff GP penalty ──
+  // In PO, GP varies dramatically (1 to 28). Players with only a handful of
+  // games shouldn't rank near the top — small samples are too noisy. We apply
+  // a linear multiplicative penalty: full credit at FULL_GP+ games, scaling
+  // down linearly below that. A 1-GP player gets 10% of their raw score; a
+  // 10-GP player gets full credit.
+  //
+  // This mirrors the regular-season ranking philosophy where 8-GP players
+  // land well outside the top 50 despite high per-game numbers.
+  if (URL_PHASE === 'po') {
+    const FULL_GP = 10;  // GP at which a player receives full credit
+    players.forEach(p => {
+      p.DEF_SCORE_UNSHRUNK = p.DEF_SCORE;
+      p.DEF_SCORE_RAW_UNSHRUNK = p.DEF_SCORE_RAW;
+      const factor = Math.min(1, p.GP / FULL_GP);
+      p.DEF_SCORE = p.DEF_SCORE * factor;
+      p.DEF_SCORE_RAW = p.DEF_SCORE_RAW * factor;
+    });
+  }
+
+  players.sort((a, b) => b.DEF_SCORE - a.DEF_SCORE);
+  players.forEach((p, i) => p.RANK = i + 1);
+  return { players, lastUpdated, seasonLabel };
+}
+
+async function refreshData() {
+  const btn = document.getElementById('refreshBtn');
+  btn.textContent = '⏳ Loading…';
+  btn.disabled = true;
+  document.getElementById('loading').style.display = 'block';
+  document.getElementById('mainTable').style.display = 'none';
+  document.getElementById('error').style.display = 'none';
+
+  try {
+    const loadEl = document.getElementById('loading');
+    loadEl.innerHTML = `<div class="spinner"></div><br>Fetching Defensive Rankings…`;
+
+    const res = await fetch(makeURL('Defensive_Rankings'));
+    if (!res.ok) throw new Error(`HTTP ${res.status} fetching Defensive Rankings`);
+    const data = await res.json();
+
+    if (!data.values || data.values.length < 3) throw new Error('No data in Defensive Rankings tab');
+
+    // Also load the historical seasons tab (optional — index still works if it's absent)
+    let histValues = [];
+    try {
+      const rh = await fetch(makeURL('Defensive_History'));
+      if (rh.ok) { const dh = await rh.json(); if (dh.values && dh.values.length) histValues = dh.values; }
+    } catch (e) { console.warn('Defensive_History tab not loaded:', e); }
+    const allValues = data.values.concat(histValues);
+
+    // Split rows into sections by markers
+    const sections = []; // [{key, rows}]
+    let currentRows = [];
+    let currentKey = 'season';
+
+    for (const row of allValues) {
+      const firstCell = (row[0] || '').trim();
+      const seasonMatch = firstCell.match(/^\[(\d{4}-\d{2})\]$/);
+      if (SECTION_MAP[firstCell] || seasonMatch) {
+        if (currentRows.length > 0) sections.push({ key: currentKey, rows: currentRows });
+        currentKey = seasonMatch ? seasonMatch[1] : SECTION_MAP[firstCell];
+        currentRows = [];
+      } else {
+        currentRows.push(row);
+      }
+    }
+    if (currentRows.length > 0) sections.push({ key: currentKey, rows: currentRows });
+
+    // Parse each section
+    allPeriods = {};
+    for (const sec of sections) {
+      const result = parseSectionPlayers(sec.rows);
+      if (result && result.players.length > 0) {
+        allPeriods[sec.key] = result;
+      }
+    }
+
+    if (!allPeriods.season) throw new Error('No season data found');
+
+    // Make the live season selectable in the dropdown under its own year (e.g. 2025-26),
+    // so the current season sits alongside the historical ones on the same normalized scale.
+    const curLabel = allPeriods.season.seasonLabel;
+    if (curLabel && !allPeriods[curLabel]) allPeriods[curLabel] = allPeriods.season;
+
+    console.log(`Loaded periods: ${Object.keys(allPeriods).join(', ')} (${Object.values(allPeriods).map(p => p.players.length + ' players').join(', ')})`);
+
+    // Show/hide period buttons based on available data
+    document.querySelectorAll('.period-btn').forEach(btn => {
+      const period = btn.dataset.period;
+      if (period === 'season' || allPeriods[period]) {
+        btn.style.display = '';
+      } else {
+        btn.style.display = 'none';
+      }
+    });
+
+    // Populate the historical-season dropdown from any [YYYY-YY] periods that loaded
+    const seasonKeys = Object.keys(allPeriods).filter(k => /^\d{4}-\d{2}$/.test(k)).sort().reverse();
+    const seasonSelect = document.getElementById('seasonSelect');
+    if (seasonSelect && seasonKeys.length) {
+      seasonSelect.innerHTML = '<option value="">Past season \u25be</option>' +
+        seasonKeys.map(k => `<option value="${k}">${k}</option>`).join('');
+      seasonSelect.style.display = '';
+    }
+
+    // Activate current period
+    setPeriod(currentPeriod);
+
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('mainTable').style.display = '';
+
+  } catch (err) {
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('error').style.display = 'block';
+    document.getElementById('error').textContent = "Couldn't load the rankings. Try refreshing — if this keeps happening, the stats might be updating right now.";
+    console.error('[Defense]', err);
+  }
+  btn.textContent = '↻ Refresh';
+  btn.disabled = false;
+}
+
+function setPeriod(period, btn) {
+  if (!period || !allPeriods[period]) period = 'season';
+  currentPeriod = period;
+
+  appData = { players: allPeriods[period].players, lastUpdated: allPeriods[period].lastUpdated || allPeriods.season.lastUpdated, teamDefMap: {} };
+
+  const isSeason = /^\d{4}-\d{2}$/.test(period);
+  const seasonSelect = document.getElementById('seasonSelect');
+
+  // Update active state across the period buttons + the season dropdown
+  document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+  if (isSeason) {
+    if (seasonSelect) { seasonSelect.value = period; seasonSelect.classList.add('active'); }
+  } else {
+    if (seasonSelect) { seasonSelect.value = ''; seasonSelect.classList.remove('active'); }
+    const activeBtn = btn || document.querySelector(`.period-btn[data-period="${period}"]`);
+    if (activeBtn) activeBtn.classList.add('active');
+  }
+
+  // GP filter default: historical seasons behave like the live season (Min GP 40)
+  const gpFilter = document.getElementById('gpFilter');
+  gpFilter.value = GP_DEFAULTS[period] || (isSeason ? '40' : '0');
+
+  buildStats();
+  buildTeamFilter();
+  update();
+}
+
+function buildStats() {
+  if (!appData) return;
+  const p = appData.players;
+  document.getElementById('statPlayers').textContent = p.length;
+  document.getElementById('statTop').textContent = p[0] ? p[0].PLAYER : '—';
+  document.getElementById('statScore').innerHTML = p[0]
+    ? `${p[0].DEF_SCORE.toFixed(1)} <span class="unit">pts</span>`
+    : '—';
+  document.getElementById('statDate').innerHTML = `<span class="unit">${appData.lastUpdated}</span>`;
+}
+
+function buildTeamFilter() {
+  if (!appData) return;
+  const sel = document.getElementById('teamFilter');
+  const teams = [...new Set(appData.players.map(p => p.TEAM))].sort();
+  sel.innerHTML = '<option value="">All Teams</option>';
+  for (const t of teams) {
+    sel.innerHTML += `<option value="${t}">${t}</option>`;
+  }
+  // Restore team filter from URL if a valid team is present
+  const urlTeam = new URLSearchParams(location.search).get('team');
+  if (urlTeam && [...sel.options].some(o => o.value === urlTeam)) {
+    sel.value = urlTeam;
+  }
+}
+
+// URL state: ?team= persists across reloads and makes filtered views shareable
+function syncTeamToUrl() {
+  const val = document.getElementById('teamFilter').value;
+  const url = new URL(location.href);
+  if (val) url.searchParams.set('team', val);
+  else url.searchParams.delete('team');
+  history.replaceState(null, '', url);
+}
+function setTeamFilter(team) {
+  document.getElementById('teamFilter').value = team;
+  syncTeamToUrl();
+  update();
+}
+
+// ═══════════════════════════════════════════════════════
+// RENDERING
+// ═══════════════════════════════════════════════════════
+let sortCol = 'rank', sortAsc = false;
+
+function update() {
+  if (!appData) return;
+  let filtered = [...appData.players];
+
+  // Filters
+  const search = document.getElementById('search').value.toLowerCase();
+  const teamF  = document.getElementById('teamFilter').value;
+  const gpF    = parseInt(document.getElementById('gpFilter').value) || 0;
+
+  if (search) filtered = filtered.filter(p => p.PLAYER.toLowerCase().includes(search) || p.TEAM.toLowerCase().includes(search));
+  if (teamF)  filtered = filtered.filter(p => p.TEAM === teamF);
+  if (gpF > 0) filtered = filtered.filter(p => p.GP >= gpF);
+
+  // Sort
+  const col = sortCol;
+  filtered.sort((a, b) => {
+    let va, vb;
+    switch (col) {
+      case 'rank':    va = a.DEF_SCORE; vb = b.DEF_SCORE; return sortAsc ? va - vb : vb - va;
+      case 'player':  va = a.PLAYER; vb = b.PLAYER; return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+      case 'team':    va = a.TEAM; vb = b.TEAM; return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+      case 'score':   va = a.DEF_SCORE; vb = b.DEF_SCORE; break;
+      case 'stl':     va = a.STL_PG; vb = b.STL_PG; break;
+      case 'blk':     va = a.BLK_PG; vb = b.BLK_PG; break;
+      case 'defl':    va = a.DEFLECTIONS_PG; vb = b.DEFLECTIONS_PG; break;
+      case 'contest': va = a.CONTESTED_SHOTS_PG; vb = b.CONTESTED_SHOTS_PG; break;
+      case 'dfgpct':  va = a.D_FG_PCT||0; vb = b.D_FG_PCT||0; break;
+      case 'dfgdiff': va = a.PCT_PLUSMINUS||0; vb = b.PCT_PLUSMINUS||0; break;
+      case 'drtg':    va = a.DEF_RATING||999; vb = b.DEF_RATING||999; break;
+      case 'gp':      va = a.GP; vb = b.GP; break;
+      case 'mpg':     va = a.MPG; vb = b.MPG; break;
+      case 'spm':     va = a.MPG>0?a.DEF_SCORE_RAW/a.MPG:0; vb = b.MPG>0?b.DEF_SCORE_RAW/b.MPG:0; break;
+      default:        va = a.RANK; vb = b.RANK;
+    }
+    return sortAsc ? va - vb : vb - va;
+  });
+
+  // Render
+  const tbody = document.getElementById('tbody');
+  tbody.innerHTML = '';
+  if (filtered.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="14" style="text-align:center;padding:2rem 1rem;color:var(--text-secondary)">No players match the current filters. Try widening the team selection or lowering the GP threshold.</td></tr>';
+    return;
+  }
+  const maxScore = filtered.length > 0 ? Math.max(...filtered.map(p => p.DEF_SCORE)) : 35;
+  for (let idx = 0; idx < filtered.length; idx++) {
+    const p = filtered[idx];
+    const rank = idx + 1;
+    const rankClass = rank <= 5 ? 'top5' : rank <= 15 ? 'top15' : '';
+    const barW = Math.round((p.DEF_SCORE / maxScore) * 80);
+    const dfgDiff = p.PCT_PLUSMINUS !== null ? (p.PCT_PLUSMINUS * 100) : null;
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="rank ${rankClass}">${rank}</td>
+      <td class="player">${p.PLAYER}</td>
+      <td class="team" style="cursor:pointer;text-decoration:underline;text-underline-offset:2px" onclick="setTeamFilter('${p.TEAM}')">${p.TEAM}</td>
+      <td class="score">${p.DEF_SCORE.toFixed(1)}<span class="score-bar" style="width:${barW}px"></span></td>
+      <td class="num">${p.STL_PG.toFixed(2)}</td>
+      <td class="num">${p.BLK_PG.toFixed(2)}</td>
+      <td class="num">${p.DEFLECTIONS_PG.toFixed(1)}</td>
+      <td class="num">${p.CONTESTED_SHOTS_PG.toFixed(1)}</td>
+      <td class="num">${p.D_FG_PCT !== null ? (p.D_FG_PCT * 100).toFixed(1) + '%' : '—'}</td>
+      <td class="num ${dfgDiff !== null ? (dfgDiff < 0 ? 'good' : 'bad') : ''}">${dfgDiff !== null ? (dfgDiff >= 0 ? '+' : '') + dfgDiff.toFixed(1) + '%' : '—'}</td>
+      <td class="num">${p.DEF_RATING !== null ? p.DEF_RATING.toFixed(1) : '—'}</td>
+      <td class="num">${p.GP}</td>
+      <td class="num">${p.MPG.toFixed(1)}</td>
+      <td class="num">${p.MPG > 0 ? (p.DEF_SCORE_RAW / p.MPG).toFixed(2) : '—'}</td>
+    `;
+    // Tooltip on hover
+    tr.addEventListener('mouseenter', e => showTooltip(e, p));
+    tr.addEventListener('mousemove', e => moveTooltip(e));
+    tr.addEventListener('mouseleave', hideTooltip);
+    tbody.appendChild(tr);
+  }
+
+  // Update header sort indicators
+  document.querySelectorAll('thead th').forEach(th => {
+    th.classList.remove('sorted-asc', 'sorted-desc');
+    if (th.dataset.col === sortCol) {
+      th.classList.add(sortAsc ? 'sorted-asc' : 'sorted-desc');
+    }
+  });
+}
+
+// Column sort
+document.querySelectorAll('thead th').forEach(th => {
+  th.addEventListener('click', () => {
+    const col = th.dataset.col;
+    if (sortCol === col) {
+      sortAsc = !sortAsc;
+    } else {
+      sortCol = col;
+      // Default sort directions
+      sortAsc = ['player', 'team', 'dfgpct', 'dfgdiff', 'drtg'].includes(col);
+    }
+    update();
+  });
+});
+
+// ═══════════════════════════════════════════════════════
+// TOOLTIP
+// ═══════════════════════════════════════════════════════
+function showTooltip(e, p) {
+  const tt = document.getElementById('tooltip');
+  const archLabel = p.PERIM_W > 0.6 ? 'Perimeter' : p.PERIM_W <= 0.4 ? 'Interior' : 'Mixed';
+  const teamRank = p.TEAM_DEF_RANK ? `#${p.TEAM_DEF_RANK}` : '—';
+  const teamDrtg = p.TEAM_DEF_RATING ? p.TEAM_DEF_RATING.toFixed(1) : '—';
+  tt.innerHTML = `
+    <div class="tp-name">${p.PLAYER} · ${p.TEAM}</div>
+    <div class="tp-row"><span class="tp-label">Archetype</span><span class="tp-val">${archLabel} (${(p.PERIM_W * 100).toFixed(0)}% perim)</span></div>
+    <div class="tp-row"><span class="tp-label">Def Score</span><span class="tp-val">${p.DEF_SCORE.toFixed(1)}</span></div>
+    <div class="tp-row"><span class="tp-label">Base Raw</span><span class="tp-val">${p.DEF_SCORE_RAW.toFixed(1)}</span></div>
+    <div class="tp-row"><span class="tp-label">GP Avail.</span><span class="tp-val">${p.GP}/${p.TEAM_GP} (${(p.GP_RATIO * 100).toFixed(0)}%) → ×${(0.5 + 0.5 * p.GP_RATIO).toFixed(3)}</span></div>
+    <div class="tp-row"><span class="tp-label">Efficiency</span><span class="tp-val">${p.EFF_Z >= 0 ? '+' : ''}${p.EFF_Z.toFixed(2)}σ → ×${p.EFF_MULT.toFixed(3)}</span></div>
+    <div class="tp-row"><span class="tp-label">Anchor Bonus</span><span class="tp-val">${p.ANCHOR_BONUS > 0.1 ? '+' + p.ANCHOR_BONUS.toFixed(1) : 'None'}</span></div>
+    <div class="tp-row"><span class="tp-label">Team Defense</span><span class="tp-val">${teamRank} (${teamDrtg} DRTG)</span></div>
+  `;
+  tt.style.display = 'block';
+  moveTooltip(e);
+}
+
+function moveTooltip(e) {
+  const tt = document.getElementById('tooltip');
+  const x = Math.min(e.clientX + 14, window.innerWidth - 340);
+  const y = Math.min(e.clientY + 14, window.innerHeight - 220);
+  tt.style.left = x + 'px';
+  tt.style.top = y + 'px';
+}
+
+function hideTooltip() {
+  document.getElementById('tooltip').style.display = 'none';
+}
+
+// ═══════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════
+refreshData();
+</script>
+</body>
+</html>
