@@ -166,7 +166,7 @@ td.anchor.zero { color:var(--text-muted); }
     <button class="period-btn" data-period="last30" onclick="setPeriod('last30',this)">Last 30 Days</button>
     <button class="period-btn" data-period="last7" onclick="setPeriod('last7',this)">Last 7 Days</button>
     <button class="period-btn" data-period="lastday" onclick="setPeriod('lastday',this)">Last Day</button>
-    <select class="period-btn" id="seasonSelect" onchange="setPeriod(this.value)" style="display:none"><option value="">Past season ▾</option></select>
+    <select class="period-btn" id="seasonSelect" onchange="setPeriod(this.value)" style="display:none"></select>
   </div>
 </div>
 
@@ -437,8 +437,7 @@ async function refreshData() {
     const seasonKeys = Object.keys(allPeriods).filter(k => /^\d{4}-\d{2}$/.test(k)).sort().reverse();
     const seasonSelect = document.getElementById('seasonSelect');
     if (seasonSelect && seasonKeys.length) {
-      seasonSelect.innerHTML = '<option value="">Past season \u25be</option>' +
-        seasonKeys.map(k => `<option value="${k}">${k}</option>`).join('');
+      seasonSelect.innerHTML = seasonKeys.map(k => `<option value="${k}">${k}</option>`).join('');
       seasonSelect.style.display = '';
     }
 
@@ -475,7 +474,7 @@ function setPeriod(period, btn) {
   if (isSeason) {
     if (seasonSelect) { seasonSelect.value = period; seasonSelect.classList.add('active'); }
   } else {
-    if (seasonSelect) { seasonSelect.value = ''; seasonSelect.classList.remove('active'); }
+    if (seasonSelect) { seasonSelect.selectedIndex = -1; seasonSelect.classList.remove('active'); }
     const activeBtn = btn || document.querySelector(`.period-btn[data-period="${period}"]`);
     if (activeBtn) activeBtn.classList.add('active');
   }
