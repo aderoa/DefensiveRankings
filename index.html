@@ -442,8 +442,11 @@ async function refreshData() {
       seasonSelect.style.display = '';
     }
 
-    // Activate current period
-    setPeriod(currentPeriod);
+    // Default to the NEWEST season rather than the live "Season" tab. During the offseason
+    // the live tab is a stale/blank snapshot, and once a season is archived the history copy
+    // is canonical. seasonKeys is sorted desc, so this auto-advances to 2026-27 the moment
+    // that block exists (or the live alias reports it).
+    setPeriod(seasonKeys.length ? seasonKeys[0] : currentPeriod);
 
     document.getElementById('loading').style.display = 'none';
     document.getElementById('mainTable').style.display = '';
