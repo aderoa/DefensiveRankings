@@ -276,6 +276,17 @@ const GP_DEFAULTS = {
 };
 const SECTION_MAP = { '[LAST_DAY]': 'lastday', '[LAST_7D]': 'last7', '[LAST_30D]': 'last30' };
 
+// THE SEASON THE CALENDAR IS IN, not the one a meta row still remembers.
+//
+// 1 September is the boundary the rest of the platform uses, and the NBA has
+// never opened a season in August. October 2026 is therefore 2026-27, and this
+// function says so without asking the sheet.
+function currentSeasonLabel(d) {
+  d = d || new Date();
+  const y = d.getMonth() >= 8 ? d.getFullYear() : d.getFullYear() - 1;
+  return y + '-' + String((y + 1) % 100).padStart(2, '0');
+}
+
 function parseSectionPlayers(rows) {
   // Find header row within this section's rows
   let headerIdx = -1, meta = '';
@@ -416,10 +427,34 @@ async function refreshData() {
 
     if (!allPeriods.season) throw new Error('No season data found');
 
-    // Make the live season selectable in the dropdown under its own year (e.g. 2025-26),
-    // so the current season sits alongside the historical ones on the same normalized scale.
-    const curLabel = allPeriods.season.seasonLabel;
-    if (curLabel && !allPeriods[curLabel]) allPeriods[curLabel] = allPeriods.season;
+    // Make the live season selectable in the dropdown under its own year, so the
+    // current season sits alongside the historical ones on the same normalized
+    // scale.
+    //
+    // THE LABEL COMES FROM THE CALENDAR, NOT FROM THE SHEET. The meta row said
+    // "Season: 2025-26" into late October, which filed this season's games
+    // under last season's name, showed that name in the dropdown, and opened
+    // the page on it -- three wrong answers from one stale string.
+    //
+    // A sheet label that is NEWER than the calendar is kept: that would be the
+    // sheet knowing something about a season that has not started yet, which is
+    // a judgement, where a label behind the calendar is just old.
+    const sheetLabel = allPeriods.season.seasonLabel || '';
+    const calLabel = currentSeasonLabel();
+    const curLabel = (sheetLabel > calLabel) ? sheetLabel : calLabel;
+    if (sheetLabel && sheetLabel !== curLabel) {
+      console.warn('[Defense] the Defensive_Rankings meta row says "Season: '
+        + sheetLabel + '" but it is ' + curLabel + '. Using ' + curLabel
+        + ' here; the meta row is still worth fixing where it is written.');
+    }
+    allPeriods.season.seasonLabel = curLabel;
+    // FOR THE SEASON BEING PLAYED, THE LIVE TAB WINS. The old test was
+    // `if (!allPeriods[curLabel])`, which prefers an archived block -- correct
+    // once a season is over and finished, wrong while it is being played,
+    // because an archive cannot contain last night.
+    if (curLabel === calLabel || !allPeriods[curLabel]) {
+      allPeriods[curLabel] = allPeriods.season;
+    }
 
     console.log(`Loaded periods: ${Object.keys(allPeriods).join(', ')} (${Object.values(allPeriods).map(p => p.players.length + ' players').join(', ')})`);
 
@@ -479,9 +514,38 @@ function setPeriod(period, btn) {
     if (activeBtn) activeBtn.classList.add('active');
   }
 
-  // GP filter default: historical seasons behave like the live season (Min GP 40)
+  // GP filter default.
+  //
+  // THE FLOOR CANNOT ASK FOR MORE GAMES THAN THE SEASON HAS. This was a flat
+  // 40+ for any season key, so selecting 2026-27 in October filtered out every
+  // player and the table read "No players match the current filters" over a
+  // full set of rows.
+  //
+  // Instead: the strictest floor, up to the old 40, that still leaves a field
+  // to look at. Measured on the pool itself rather than on a games count --
+  // the first version of this took half of the highest GP in the pool, which
+  // quietly moved a FINISHED season to 30+ whenever its busiest player had
+  // played 79 games rather than 82. The question that matters is not how long
+  // the season is, it is whether the floor leaves anybody standing.
+  //
+  // So: October gets 0, a season far enough along gets 40 exactly as it always
+  // did, and the steps in between come for free.
   const gpFilter = document.getElementById('gpFilter');
-  gpFilter.value = GP_DEFAULTS[period] || (isSeason ? '40' : '0');
+  let gpDefault = GP_DEFAULTS[period];
+  if (!gpDefault) {
+    gpDefault = '0';
+    if (isSeason) {
+      const MIN_FIELD = 10;   // fewer than this is not a ranking
+      const pool = (allPeriods[period] && allPeriods[period].players) || [];
+      const opts = [...gpFilter.options]
+        .map(o => parseInt(o.value, 10) || 0)
+        .filter(v => v <= 40)            // never stricter than the old default
+        .sort((a, b) => b - a);          // strictest first
+      const ok = opts.find(v => pool.filter(p => (p.GP || 0) >= v).length >= MIN_FIELD);
+      gpDefault = String(ok === undefined ? 0 : ok);
+    }
+  }
+  gpFilter.value = gpDefault;
 
   buildStats();
   buildTeamFilter();
