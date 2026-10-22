@@ -287,7 +287,70 @@ function currentSeasonLabel(d) {
   return y + '-' + String((y + 1) % 100).padStart(2, '0');
 }
 
-function parseSectionPlayers(rows) {
+// ── how much of a score a sample is allowed to carry ──
+//
+// Minutes needed before a score stands on its own. Per period, because the
+// windows ask different questions: a season's worth of evidence is about ten
+// starter games, where a single day's is most of one game.
+const FULL_MINUTES = { season: 300, last30: 200, last7: 90, lastday: 20 };
+
+function shrinkBySampleSize(players, periodKey) {
+  // TOWARD THE MEAN, NOT TOWARD ZERO.
+  //
+  // The old playoff penalty multiplied the score by GP/10, which on a scale
+  // whose average is ~15 says a one-game player is the worst defender alive
+  // and drags a five-game average defender to half of average. Both are
+  // statements the data cannot support. A small sample does not mean "bad",
+  // it means "we do not know" -- and the honest estimate for a player we do
+  // not know is the average one.
+  //
+  // Measured in MINUTES rather than games, because October exposes what games
+  // cannot see: everyone has played one, and Jericho Sims's 1.9 minutes and a
+  // starter's 38 are the same number of games. His whole defensive record is
+  // one contested shot that went in, read as a 100% opponent FG% -- the most
+  // extreme figure in the league, on one attempt.
+  if (!players || !players.length) return;
+
+  // THE RAMP CANNOT ASK FOR MORE MINUTES THAN THE SEASON HAS PLAYED.
+  //
+  // A flat 300 is right in January and useless in October: with one game
+  // gone, every weight is about 0.08, the whole board collapses onto the
+  // mean, and a Score column where everyone reads 1.1 is no more useful than
+  // one led by a two-minute cameo. The order would be right and the page
+  // unreadable.
+  //
+  // So the target is the 90th percentile of minutes actually played, capped
+  // at the period's figure. After one night that is roughly a starter's
+  // workload, so starters carry their full score and Sims's 1.9 minutes
+  // carry a sixteenth of his. By December the cap binds and the behaviour is
+  // the stable one. The 90th rather than the max, so one iron-man does not
+  // set the bar for everybody.
+  const allMins = players.map(p => (p.GP || 0) * (p.MPG || 0))
+                         .filter(v => isFinite(v) && v > 0)
+                         .sort((a, b) => a - b);
+  const p90 = allMins.length
+    ? allMins[Math.min(allMins.length - 1, Math.floor(allMins.length * 0.9))]
+    : 0;
+  const target = FULL_MINUTES[periodKey] || FULL_MINUTES.season;
+  const full = Math.max(1, Math.min(target, p90 || target));
+  const scores = players.map(p => p.DEF_SCORE).filter(v => isFinite(v));
+  if (!scores.length) return;
+  const mean = scores.reduce((s, v) => s + v, 0) / scores.length;
+  players.forEach(p => {
+    const mins = (p.GP || 0) * (p.MPG || 0);
+    const w = Math.max(0, Math.min(1, full > 0 ? mins / full : 1));
+    p.SAMPLE_MINUTES = mins;
+    p.SAMPLE_WEIGHT = w;
+    p.DEF_SCORE_UNSHRUNK = p.DEF_SCORE;
+    p.DEF_SCORE_RAW_UNSHRUNK = p.DEF_SCORE_RAW;
+    p.DEF_SCORE = mean + (p.DEF_SCORE - mean) * w;
+    // DEF_SCORE_RAW keeps the same treatment so SC/MPG, which divides it by
+    // minutes, does not reward the very sample this is correcting.
+    p.DEF_SCORE_RAW = p.DEF_SCORE_RAW * w + (1 - w) * 0;
+  });
+}
+
+function parseSectionPlayers(rows, periodKey) {
   // Find header row within this section's rows
   let headerIdx = -1, meta = '';
   for (let i = 0; i < Math.min(rows.length, 5); i++) {
@@ -343,25 +406,7 @@ function parseSectionPlayers(rows) {
     if (p.GP >= 1) players.push(p);
   }
 
-  // ── Playoff GP penalty ──
-  // In PO, GP varies dramatically (1 to 28). Players with only a handful of
-  // games shouldn't rank near the top — small samples are too noisy. We apply
-  // a linear multiplicative penalty: full credit at FULL_GP+ games, scaling
-  // down linearly below that. A 1-GP player gets 10% of their raw score; a
-  // 10-GP player gets full credit.
-  //
-  // This mirrors the regular-season ranking philosophy where 8-GP players
-  // land well outside the top 50 despite high per-game numbers.
-  if (URL_PHASE === 'po') {
-    const FULL_GP = 10;  // GP at which a player receives full credit
-    players.forEach(p => {
-      p.DEF_SCORE_UNSHRUNK = p.DEF_SCORE;
-      p.DEF_SCORE_RAW_UNSHRUNK = p.DEF_SCORE_RAW;
-      const factor = Math.min(1, p.GP / FULL_GP);
-      p.DEF_SCORE = p.DEF_SCORE * factor;
-      p.DEF_SCORE_RAW = p.DEF_SCORE_RAW * factor;
-    });
-  }
+  shrinkBySampleSize(players, periodKey);
 
   players.sort((a, b) => b.DEF_SCORE - a.DEF_SCORE);
   players.forEach((p, i) => p.RANK = i + 1);
@@ -419,7 +464,7 @@ async function refreshData() {
     // Parse each section
     allPeriods = {};
     for (const sec of sections) {
-      const result = parseSectionPlayers(sec.rows);
+      const result = parseSectionPlayers(sec.rows, sec.key);
       if (result && result.players.length > 0) {
         allPeriods[sec.key] = result;
       }
@@ -594,9 +639,15 @@ function setPeriod(period, btn) {
   update();
 }
 
-function buildStats() {
+function buildStats(shown) {
   if (!appData) return;
-  const p = appData.players;
+  // THE CARD FOLLOWS THE TABLE.
+  //
+  // This read appData.players[0] -- the whole pool, before any filter -- so
+  // with a Min GP floor set it announced a "#1 Defender" the table was
+  // deliberately hiding. It now reports the top of the list actually on
+  // screen, and falls back to the pool only before the first render.
+  const p = (shown && shown.length) ? shown : appData.players;
   document.getElementById('statPlayers').textContent = p.length;
   document.getElementById('statTop').textContent = p[0] ? p[0].PLAYER : '—';
   document.getElementById('statScore').innerHTML = p[0]
@@ -675,6 +726,8 @@ function update() {
     }
     return sortAsc ? va - vb : vb - va;
   });
+
+  buildStats(filtered);
 
   // Render
   const tbody = document.getElementById('tbody');
