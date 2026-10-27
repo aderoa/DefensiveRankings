@@ -2,6 +2,15 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<script>
+// THIS COPY SENDS VISITORS TO hoopsmatic.com/defense, which serves the same
+// page with the data fetched server-side by the Worker. This github.io copy
+// has no Google key any more, so it cannot load the sheet on its own.
+(function () {
+  if (/(^|\.)hoopsmatic\.com$/.test(location.hostname)) return;
+  location.replace('https://hoopsmatic.com/defense' + location.search + location.hash);
+})();
+</script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NBA Defensive Rankings — Hoopsmatic</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -247,7 +256,9 @@ td.anchor.zero { color:var(--text-muted); }
 // GOOGLE SHEETS CONFIG
 // ═══════════════════════════════════════════════════════
 const STATS_ID = '1JH2FUBIyQ1zEHzZBxgP8vHBZ7d8EtP5-fSVG3zMgCgg';
-const API_KEY  = 'AIzaSyCPUpmuvHXD-kt3Lylx5KW5IPHvQx-cygk';
+// NO KEY IN THIS PAGE. hoopsmatic.com/defense injects the data and rewrites
+// makeURL below to the Worker; github.io visitors are sent there (see <head>).
+const API_KEY  = '';
 const BASE_URL = `https://sheets.googleapis.com/v4/spreadsheets/${STATS_ID}/values`;
 const makeURL  = tab => `${BASE_URL}/${encodeURIComponent(tab)}?key=${API_KEY}`;
 
